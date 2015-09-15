@@ -1,1 +1,2 @@
-# spatial_transformer_network
+# Spatial Transformer Network
+[WIP] This is still buggy.
