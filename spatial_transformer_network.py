@@ -28,13 +28,22 @@ def load_cluttered_mnist():
     return (x_train, y_train, x_valid, y_valid, x_test, y_test)
 
 
-# TODO: If a sampling point is just on a grid intersection, just use the pixel
-# value at the point. (no interpolation is needed because the weights for
-# neighboring pixels are 0)
 class ImageSampler(Function):
     def forward(self, inputs):
         U, points = inputs
         batch_size, height, width = U.shape
+
+        # Points just on the boundary are slightly (i.e. nextafter in float32)
+        # moved inward to simplify the implementation
+        points = points.copy()
+        on_boundary = (points == 0)
+        points[on_boundary] = np.nextafter(points[on_boundary], np.float32(1))
+        x = points[:, 0]
+        y = points[:, 1]
+        on_boundary = (x == (width - 1))
+        x[on_boundary] = np.nextafter(x[on_boundary], np.float32(0))
+        on_boundary = (y == (height - 1))
+        y[on_boundary] = np.nextafter(y[on_boundary], np.float32(0))
 
         batch_axis = np.expand_dims(np.arange(batch_size), 1)
         points_floor = np.floor(points)
@@ -53,8 +62,6 @@ class ImageSampler(Function):
 
         # remove points outside of the (source) image region
         # by setting their weights to 0
-        x = points[:, 0]
-        y = points[:, 1]
         x_invalid = np.logical_or(x < 0, (width - 1) < x)
         y_invalid = np.logical_or(y < 0, (height - 1) < y)
         invalid = np.logical_or(x_invalid, y_invalid)
@@ -116,6 +123,7 @@ class ImageSampler(Function):
 
         # gpoints #######################################################
         batch_axis = np.expand_dims(np.arange(batch_size), 1)
+
         U_ll = U[batch_axis, y_l, x_l]
         U_lh = U[batch_axis, y_l, x_h]
         U_hl = U[batch_axis, y_h, x_l]

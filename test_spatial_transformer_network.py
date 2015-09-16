@@ -16,6 +16,50 @@ from spatial_transformer_network import (
 
 class SpatialTransformerTest(unittest.TestCase):
     # TODO: Add test cases which some points are outside of the image region
+    def test_spatial_transformer_call(self):
+        # data
+        x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
+
+        # model
+        in_shape = x_data.shape[1:]
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+
+        # forward and backward
+        x = Variable(x_data)
+        y, theta = spatial_transformer(x)
+        y.grad = np.ones_like(y.data)
+        y.backward(retain_grad=True)
+
+        # y (data)
+        expected_y = np.array([[0, 1, 5, 6],
+                               [25, 26, 30, 31]], dtype=np.float32)
+        assert np.allclose(y.data, expected_y)
+        assert y.data.dtype == expected_y.dtype
+        assert y.data.shape == expected_y.shape
+
+        # theta (data)
+        expected_theta = np.array([[0, 0],
+                                   [0, 0]], dtype=np.float32)
+        assert np.allclose(theta.data, expected_theta)
+        assert theta.data.dtype == expected_theta.dtype
+        assert theta.data.shape == expected_theta.shape
+
+        # theta (gradient)
+        expected_gtheta = np.array([[4, 20],
+                                    [4, 20]], dtype=np.float32)
+        assert np.allclose(theta.grad, expected_gtheta)
+        assert theta.grad.dtype == expected_gtheta.dtype
+        assert theta.grad.shape == expected_gtheta.shape
+
+        # x (gradient)
+        expected_gx = np.zeros_like(x_data)
+        expected_gx[:, 0:2, 0:2] = 1
+        assert np.allclose(x.grad, expected_gx)
+        assert x.grad.dtype == expected_gx.dtype
+        assert x.grad.shape == expected_gx.shape
+
+
     def test_spatial_transformer_parameteres(self):
         in_shape = (5, 5)
         out_shape = (2, 2)
@@ -83,7 +127,7 @@ class ImageSamplerTest(unittest.TestCase):
         assert y.dtype == expected_y.dtype
         assert y.shape == expected_y.shape
 
-    # TODO: Add test cases which some points are outside of the image region
+
     def test_image_sampler_backward(self):
         x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
         points_data = np.array([[[1, 1, 2, 3],
@@ -97,7 +141,7 @@ class ImageSamplerTest(unittest.TestCase):
         y = image_sampler(x, points)
 
         func = lambda: image_sampler.forward((x_data, points_data))
-        y.grad = np.full(y.data.shape, 1, dtype=np.float32)
+        y.grad = np.ones_like(y.data)
         y.backward()
         grad = gradient_check.numerical_grad(func,
                                              (x_data, points_data),
@@ -113,6 +157,86 @@ class ImageSamplerTest(unittest.TestCase):
         print "gpoints:", points.grad
         print "gpoints (numerical):", gpoints_numerical
         gradient_check.assert_allclose(points.grad, gpoints_numerical)
+
+
+    def test_image_sampler_backward2(self):
+        # data
+        x_data = np.arange(25, dtype=np.float32).reshape(1, 5, 5)
+        x_data = np.vstack((x_data, x_data, x_data))
+
+        points_data = []
+        x0 = np.array([0.5, 2.0, 3.5])
+        y0 = np.array([0.5, 2.0, 3.5])
+        x, y = np.meshgrid(x0, y0)
+        x = x.ravel()
+        y = y.ravel()
+        points_data.append([x, y])
+
+        x1 = np.array([0, 2, 4])
+        y1 = np.array([0, 2, 4])
+        x, y = np.meshgrid(x1, y1)
+        x = x.ravel()
+        y = y.ravel()
+        points_data.append([x, y])
+
+        x2 = np.array([-2, -1, -0.1])
+        y2 = np.array([4.1, 5, 6])
+        x, y = np.meshgrid(x2, y2)
+        x = x.ravel()
+        y = y.ravel()
+        points_data.append([x, y])
+        points_data = np.array(points_data, dtype=np.float32)
+        assert points_data.shape == (3, 2, 9)
+        assert points_data.dtype == np.float32
+        print points_data
+
+        # model
+        image_sampler = ImageSampler()
+
+        # forward and backward
+        x = Variable(x_data)
+        points = Variable(points_data)
+        y = image_sampler(x, points)
+        y.grad = np.ones_like(y.data)
+        y.backward()
+
+        # y (data)
+        expected_y = np.array([[3, 4.5, 6, 10.5, 12, 13.5, 18, 19.5, 21],
+                               [0, 2, 4, 10, 12, 14, 20, 22, 24],
+                               [0, 0, 0, 0, 0, 0, 0, 0, 0]],
+                              dtype=np.float32)
+        gradient_check.assert_allclose(y.data, expected_y)
+        assert y.data.dtype == expected_y.dtype
+        assert y.data.shape == expected_y.shape
+
+        func = lambda: image_sampler.forward((x_data, points_data))
+        y.grad = np.ones_like(y.data)
+        y.backward()
+        grad = gradient_check.numerical_grad(func,
+                                             (x_data, points_data),
+                                             (y.grad,),
+                                             eps=1e-0)
+        gx_numerical, gpoints_numerical = grad
+
+        # check gx
+        print "Check gx:"
+        print "gx:", x.grad
+        print "gx (numerical):", gx_numerical
+        gradient_check.assert_allclose(x.grad, gx_numerical)
+
+        # check gpoints (Note that the numerical gradient is undefiend where
+        # points near or out of boudary.)
+        expected_gpoints = np.array([
+            [[1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [5, 5, 5, 5, 5, 5, 5, 5, 5]],
+            [[1, 1, 1, 1, 1, 1, 1, 1, 1],
+             [5, 5, 5, 5, 5, 5, 5, 5, 5]],
+            [[0, 0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0, 0]]], dtype=np.float32)
+        print "Check gpoints:"
+        print "gpoints:", points.grad
+        print "gpoints (numerical):", gpoints_numerical
+        gradient_check.assert_allclose(points.grad, expected_gpoints)
 
 
 if __name__ == '__main__':
