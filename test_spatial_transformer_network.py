@@ -16,6 +16,50 @@ from spatial_transformer_network import (
 
 class SpatialTransformerTest(unittest.TestCase):
     # TODO: Add test cases which some points are outside of the image region
+    def test_spatial_transformer_call(self):
+        # data
+        x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
+
+        # model
+        in_shape = x_data.shape[1:]
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+
+        # forward and backward
+        x = Variable(x_data)
+        y, theta = spatial_transformer(x)
+        y.grad = np.ones_like(y.data)
+        y.backward(retain_grad=True)
+
+        # y (data)
+        expected_y = np.array([[0, 1, 5, 6],
+                               [25, 26, 30, 31]], dtype=np.float32)
+        assert np.allclose(y.data, expected_y)
+        assert y.data.dtype == expected_y.dtype
+        assert y.data.shape == expected_y.shape
+
+        # theta (data)
+        expected_theta = np.array([[0, 0],
+                                   [0, 0]], dtype=np.float32)
+        assert np.allclose(theta.data, expected_theta)
+        assert theta.data.dtype == expected_theta.dtype
+        assert theta.data.shape == expected_theta.shape
+
+        # theta (gradient)
+        expected_gtheta = np.array([[4, 20],
+                                    [4, 20]], dtype=np.float32)
+        assert np.allclose(theta.grad, expected_gtheta)
+        assert theta.grad.dtype == expected_gtheta.dtype
+        assert theta.grad.shape == expected_gtheta.shape
+
+        # x (gradient)
+        expected_gx = np.zeros_like(x_data)
+        expected_gx[:, 0:2, 0:2] = 1
+        assert np.allclose(x.grad, expected_gx)
+        assert x.grad.dtype == expected_gx.dtype
+        assert x.grad.shape == expected_gx.shape
+
+
     def test_spatial_transformer_parameteres(self):
         in_shape = (5, 5)
         out_shape = (2, 2)
