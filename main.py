@@ -81,7 +81,8 @@ if __name__ == '__main__':
                 optimizer.zero_grads()
                 y, x_st, theta = forward(model, x_batch, train=True)
                 t = Variable(t_batch)
-                loss, accuracy = F.softmax_cross_entropy(y, t), F.accuracy(y, t)
+                loss = F.softmax_cross_entropy(y, t)
+                accuracy = F.accuracy(y, t)
                 losses.append(loss.data)
                 accuracies.append(accuracy.data)
                 loss.backward()
@@ -93,7 +94,7 @@ if __name__ == '__main__':
 
             train_loss = np.mean(losses)
             train_accuracy = np.mean(accuracies)
-            y_valid , x_st_valid, theta_valid = forward(model, x_valid_data)
+            y_valid, x_st_valid, theta_valid = forward(model, x_valid_data)
             t_valid = Variable(t_valid_data, volatile=True)
             valid_loss = F.softmax_cross_entropy(y_valid, t_valid).data
             valid_accuracy = F.accuracy(y_valid, t_valid).data
@@ -108,7 +109,7 @@ if __name__ == '__main__':
 
             # print norms of the weights
             print "    |W|", [np.linalg.norm(w) for w in
-                          model.parameters[::2]]
+                              model.parameters[::2]]
             print "    |gW|", gWs.astype(np.float32).tolist()
 
             # pring scores
@@ -119,7 +120,7 @@ if __name__ == '__main__':
             print "    [train] loss: %f" % train_loss
             print "    [valid] loss: %f" % valid_loss
             print "    [valid] best loss: %f (at #%d)" % (valid_loss_best,
-                                                        epoch_best)
+                                                          epoch_best)
             print "    [train] accuracy: %f" % train_accuracy
             print "    [valid] accuracy: %f" % valid_accuracy
             print "    [valid] best accuracy: %f (at #%d)" % (
