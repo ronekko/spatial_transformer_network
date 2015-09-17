@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import chainer.functions as F
 from chainer import Variable, FunctionSet, Function
 from chainer import cuda, gradient_check
+from chainer.utils import type_check
 
 
 def load_cluttered_mnist():
@@ -29,6 +30,21 @@ def load_cluttered_mnist():
 
 
 class ImageSampler(Function):
+    def check_type_forward(self, in_types):
+        type_check.expect(in_types.size() == 2)
+        U_type, points_type = in_types
+
+        type_check.expect(
+            U_type.dtype == np.float32,
+            U_type.ndim == 3
+        )
+        type_check.expect(
+            points_type.dtype == np.float32,
+            points_type.ndim == 3,
+            points_type.shape[0] == U_type.shape[0],
+            points_type.shape[1] == 2
+        )
+
     def forward(self, inputs):
         U, points = inputs
         batch_size, height, width = U.shape
@@ -160,6 +176,16 @@ class GridGeneratorTranslation(Function):
                                    y.ravel(),
                                    one.ravel())).astype(np.float32)
 
+    def check_type_forward(self, in_types):
+        type_check.expect(in_types.size() == 1)
+        theta_type, = in_types
+
+        type_check.expect(
+            theta_type.dtype == np.float32,
+            theta_type.ndim == 2,
+            theta_type.shape[1] == 2
+        )
+
     def forward(self, inputs):
         theta, = inputs
         batch_size = len(theta)
@@ -191,6 +217,16 @@ class GridGeneratorAffine(Function):
         self.points_t = np.vstack((x.ravel(),
                                    y.ravel(),
                                    one.ravel())).astype(np.float32)
+
+    def check_type_forward(self, in_types):
+        type_check.expect(in_types.size() == 1)
+        theta_type, = in_types
+
+        type_check.expect(
+            theta_type.dtype == np.float32,
+            theta_type.ndim == 2,
+            theta_type.shape[1] == 6
+        )
 
     def forward(self, inputs):
         theta, = inputs
@@ -264,6 +300,11 @@ class SpatialTransformer(Function):
             theta_bias_init[[2, 5]] = translation_init
 
         self.image_sampler = ImageSampler()
+
+    # forward of SpatialTransformer is a series of forward operations
+    # of existing functions. So we do not need additional type checks.
+    def check_type_forward(self, in_types):
+        pass
 
     def __call__(self, x):
         theta = self.loc_net(x)  # theta has the shape of (len(x), theta_size)
