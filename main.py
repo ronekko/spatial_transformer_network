@@ -47,9 +47,10 @@ if __name__ == '__main__':
 #    x_test = Variable(x_test_data)
 #    t_test = Variable(t_test_data)
 
-    model = FunctionSet(st=stm.SpatialTransformer(in_shape, out_shape),
-                        fc1=F.Linear(out_size, 128),
-                        fc2=F.Linear(128, 256),
+    model = FunctionSet(st=stm.SpatialTransformer(in_shape, out_shape,
+                                                  "affine", centering=True),
+                        fc1=F.Linear(out_size, 256),
+                        fc2=F.Linear(256, 256),
                         fc3=F.Linear(256, 10))
     initial_model = copy.deepcopy(model)
     optimizer = optimizers.Adam()
