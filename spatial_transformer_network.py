@@ -145,7 +145,7 @@ class ImageSampler(Function):
         return (gU, gpoints)
 
 
-class GridGenerator(Function):
+class GridGeneratorTranslation(Function):
     def __init__(self, grid_size):
         """
         Args:
@@ -177,6 +177,38 @@ class GridGenerator(Function):
         return (gtheta,)
 
 
+class GridGeneratorAffine(Function):
+    def __init__(self, grid_size):
+        """
+        Args:
+            grid_size (tuple): Shape (width, height) of target image.
+        """
+        self.grid_size = grid_size
+        width, height = grid_size
+        x, y = np.meshgrid(np.arange(width), np.arange(height), indexing='xy')
+        one = np.ones(grid_size)
+        # G in 3.2 "Parameterised Sampling Grid
+        self.points_t = np.vstack((x.ravel(),
+                                   y.ravel(),
+                                   one.ravel())).astype(np.float32)
+
+    def forward(self, inputs):
+        theta, = inputs
+        batch_size = len(theta)
+        width, height = self.grid_size
+
+        A = theta.reshape(batch_size, 2, 3)
+        points_s = np.dot(A, self.points_t).astype(np.float32)
+        return (points_s,)
+
+    def backward(self, inputs, grad_outputs):
+        gpoints, = grad_outputs  # shape: (b, 2, h*w)
+        batch_size = len(gpoints)
+        gtheta = gpoints.dot(self.points_t.T)
+        gtheta = gtheta.reshape(batch_size, 6)
+        return (gtheta,)
+
+
 class FCLocalizationNetwork(FunctionSet):
     def __init__(self, in_size, theta_size):
         sqrt2 = np.sqrt(2)
@@ -200,16 +232,37 @@ class SpatialTransformer(Function):
     """See A.3 of "Spatial Transformer Networks"
        http://arxiv.org/abs/1506.02025v1
     """
-    def __init__(self, in_shape, out_shape, loc_net=None):
+    def __init__(self, in_shape, out_shape, transformation="translation",
+                 loc_net=None, centering=False):
         self.in_shape = in_shape  # (height, width)
         self.out_shape = out_shape
-        self.theta_size = 2  # number of parameters for translation
+
+        # set number of parameters for transformation according to its type
+        if transformation == "translation":
+            self.theta_size = 2
+            self.grid_generator = GridGeneratorTranslation(out_shape)
+        if transformation == "affine":
+            self.theta_size = 6
+            self.grid_generator = GridGeneratorAffine(out_shape)
+
         in_size = in_shape[0] * in_shape[1]
         if loc_net is None:
             self.loc_net = FCLocalizationNetwork(in_size, self.theta_size)
         else:
             self.loc_net = loc_net
-        self.grid_generator = GridGenerator(out_shape)
+
+        # set initial bias of the last layer of localization network
+        theta_bias_init = self.loc_net.parameters[-1]
+        if centering:
+            translation_init = (np.array(in_shape) - np.array(out_shape)) / 2.0
+        else:
+            translation_init = np.zeros(2, dtype=np.float32)
+        if transformation == "translation":
+            theta_bias_init[:] = translation_init
+        if transformation == "affine":
+            theta_bias_init[[0, 4]] = 1
+            theta_bias_init[[2, 5]] = translation_init
+
         self.image_sampler = ImageSampler()
 
     def __call__(self, x):
@@ -334,7 +387,7 @@ if __name__ == '__main__':
     in_shape = x_data.shape[1:]
     out_shape = (28, 28)
     x = Variable(x_data)
-    spatial_transformer = SpatialTransformer(in_shape, out_shape)
+    spatial_transformer = SpatialTransformer(in_shape, out_shape, "affine")
     y, theta = spatial_transformer(x)
     print theta.data
     y_data = y.data

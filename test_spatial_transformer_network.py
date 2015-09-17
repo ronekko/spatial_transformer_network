@@ -10,7 +10,7 @@ import numpy as np
 from chainer import Variable
 from chainer import gradient_check
 from spatial_transformer_network import (
-    SpatialTransformer, GridGenerator, ImageSampler
+    SpatialTransformer, GridGeneratorTranslation, ImageSampler
 )
 
 
@@ -67,15 +67,15 @@ class SpatialTransformerTest(unittest.TestCase):
         assert len(spatial_transformer.parameters) != 0
 
 
-class GridGeneratorTest(unittest.TestCase):
-    def test_grid_genarator_forward(self):
+class GridGeneratorTranslationTest(unittest.TestCase):
+    def test_grid_genarator_translation_forward(self):
         # data
         width, height = (4, 3)
         grid_shape = (width, height)
         theta = np.array([[10, 20], [300, 400], [5000, 6000]])
 
         # value calculated by GridGenerator
-        grid_generator = GridGenerator(grid_shape)
+        grid_generator = GridGeneratorTranslation(grid_shape)
         points_s = grid_generator(Variable(theta)).data
 
         # expected value
