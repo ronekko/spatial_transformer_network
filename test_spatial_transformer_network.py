@@ -72,7 +72,7 @@ class GridGeneratorTranslationTest(unittest.TestCase):
         # data
         width, height = (4, 3)
         grid_shape = (width, height)
-        theta = np.array([[10, 20], [300, 400], [5000, 6000]])
+        theta = np.array([[1, 2], [30, 40], [500, 600]], dtype=np.float32)
 
         # value calculated by GridGenerator
         grid_generator = GridGeneratorTranslation(grid_shape)
