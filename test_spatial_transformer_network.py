@@ -22,7 +22,7 @@ class SpatialTransformerTest(unittest.TestCase):
 
         # model
         in_shape = x_data.shape[1:]
-        out_shape = (2, 2)
+        out_shape = (3, 3)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
 
         # forward and backward
@@ -32,8 +32,12 @@ class SpatialTransformerTest(unittest.TestCase):
         y.backward(retain_grad=True)
 
         # y (data)
-        expected_y = np.array([[0, 1, 5, 6],
-                               [25, 26, 30, 31]], dtype=np.float32)
+        expected_y = np.array([[6, 7, 8,
+                                11, 12, 13,
+                                16, 17, 18],
+                               [31, 32, 33,
+                                36, 37, 38,
+                                41, 42, 43]], dtype=np.float32)
         assert np.allclose(y.data, expected_y)
         assert y.data.dtype == expected_y.dtype
         assert y.data.shape == expected_y.shape
@@ -46,15 +50,67 @@ class SpatialTransformerTest(unittest.TestCase):
         assert theta.data.shape == expected_theta.shape
 
         # theta (gradient)
-        expected_gtheta = np.array([[4, 20],
-                                    [4, 20]], dtype=np.float32)
+        expected_gtheta = np.array([[9, 45],
+                                    [9, 45]], dtype=np.float32)
         assert np.allclose(theta.grad, expected_gtheta)
         assert theta.grad.dtype == expected_gtheta.dtype
         assert theta.grad.shape == expected_gtheta.shape
 
         # x (gradient)
         expected_gx = np.zeros_like(x_data)
-        expected_gx[:, 0:2, 0:2] = 1
+        expected_gx[:, 1:4, 1:4] = 1
+        assert np.allclose(x.grad, expected_gx)
+        assert x.grad.dtype == expected_gx.dtype
+        assert x.grad.shape == expected_gx.shape
+
+
+    def test_spatial_transformer_call2(self):
+        # data (x_ij = i^2 + j^2,  i,j=[-2, -1, 0, 1, 2])
+        x_data = np.array([[[8, 5, 4, 5, 8],
+                            [5, 2, 1, 2, 5],
+                            [4, 1, 0, 1, 4],
+                            [5, 2, 1, 2, 5],
+                            [8, 5, 4, 5, 8]]], dtype=np.float32)
+
+        # model
+        in_shape = x_data.shape[1:]
+        out_shape = (4, 4)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+
+        # forward and backward
+        x = Variable(x_data)
+        y, theta = spatial_transformer(x)
+        y.grad = np.ones_like(y.data)
+        y.backward(retain_grad=True)
+
+        # y (data)
+        expected_y = np.array([[5, 3, 3, 5,
+                                3, 1, 1, 3,
+                                3, 1, 1, 3,
+                                5, 3, 3, 5]], dtype=np.float32)
+        assert np.allclose(y.data, expected_y)
+        assert y.data.dtype == expected_y.dtype
+        assert y.data.shape == expected_y.shape
+
+        # theta (data)
+        expected_theta = np.array([[0, 0]], dtype=np.float32)
+        assert np.allclose(theta.data, expected_theta)
+        assert theta.data.dtype == expected_theta.dtype
+        assert theta.data.shape == expected_theta.shape
+
+        # theta (gradient)
+        expected_gtheta = np.array([[0, 0]], dtype=np.float32)
+        assert np.allclose(theta.grad, expected_gtheta)
+        assert theta.grad.dtype == expected_gtheta.dtype
+        assert theta.grad.shape == expected_gtheta.shape
+
+        # x (gradient)
+        expected_gx = np.zeros_like(x_data)
+        expected_gx[:, 1:4, 1:4] = 1
+        expected_gx = np.zeros_like(x_data)
+        ii, jj = np.meshgrid(np.arange(4), np.arange(4))
+        for i, j in zip(ii.ravel(), jj.ravel()):
+            expected_gx[0, i:i+2, j:j+2] += np.full((2, 2), 0.25)
         assert np.allclose(x.grad, expected_gx)
         assert x.grad.dtype == expected_gx.dtype
         assert x.grad.shape == expected_gx.shape
@@ -70,12 +126,13 @@ class SpatialTransformerTest(unittest.TestCase):
 class GridGeneratorTranslationTest(unittest.TestCase):
     def test_grid_genarator_translation_forward(self):
         # data
-        width, height = (4, 3)
-        grid_shape = (width, height)
+        height, width  = (3, 4)
+        in_shape = (height, width)
+        out_shape = in_shape
         theta = np.array([[1, 2], [30, 40], [500, 600]], dtype=np.float32)
 
         # value calculated by GridGenerator
-        grid_generator = GridGeneratorTranslation(grid_shape)
+        grid_generator = GridGeneratorTranslation(in_shape, out_shape)
         points_s = grid_generator(Variable(theta)).data
 
         # expected value
