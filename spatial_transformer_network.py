@@ -267,11 +267,18 @@ class FCLocalizationNetwork(FunctionSet):
 class SpatialTransformer(Function):
     """See A.3 of "Spatial Transformer Networks"
        http://arxiv.org/abs/1506.02025v1
+
+       Args:
+           in_shape (tuple): (height, width) of source image.
+
+           out_shape (tuple): (height, width) of target image.
     """
     def __init__(self, in_shape, out_shape, transformation="translation",
                  loc_net=None, centering=False):
+        assert len(in_shape) == 2, "in_shape must be (height, width)"
+        assert len(out_shape) == 2, "out_shape must be (height, width)"
         self.in_shape = in_shape  # (height, width)
-        self.out_shape = out_shape
+        self.out_shape = out_shape  # (height, width)
 
         # set number of parameters for transformation according to its type
         if transformation == "translation":
@@ -281,7 +288,7 @@ class SpatialTransformer(Function):
             self.theta_size = 6
             self.grid_generator = GridGeneratorAffine(out_shape)
 
-        in_size = in_shape[0] * in_shape[1]
+        in_size = np.prod(in_shape)
         if loc_net is None:
             self.loc_net = FCLocalizationNetwork(in_size, self.theta_size)
         else:
