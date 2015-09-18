@@ -162,15 +162,21 @@ class ImageSampler(Function):
 
 
 class GridGeneratorTranslation(Function):
-    def __init__(self, grid_size):
+    def __init__(self, in_shape, out_shape):
         """
         Args:
-            grid_size (tuple): Shape (width, height) of target image.
+           in_shape (tuple): (height, width) of source image.
+
+           out_shape (tuple): (height, width) of target image.
         """
-        self.grid_size = grid_size
-        width, height = grid_size
-        x, y = np.meshgrid(np.arange(width), np.arange(height), indexing='xy')
-        one = np.ones(grid_size)
+        self.in_shape = in_shape
+        self.out_shape = out_shape
+        out_height, out_width = out_shape
+
+        x = np.arange(out_width) - out_width / 2.0
+        y = np.arange(out_height) - out_height / 2.0
+        x, y = np.meshgrid(x, y, indexing='xy')
+        one = np.ones(out_shape)
         # G in 3.2 "Parameterised Sampling Grid
         self.points_t = np.vstack((x.ravel(),
                                    y.ravel(),
@@ -189,12 +195,16 @@ class GridGeneratorTranslation(Function):
     def forward(self, inputs):
         theta, = inputs
         batch_size = len(theta)
-        width, height = self.grid_size
+        in_height, in_width = self.in_shape
 
         eyes_3d = np.repeat(np.expand_dims(np.eye(2), 0), batch_size, axis=0)
         theta_3d = np.expand_dims(theta, 2)
         A = np.dstack((eyes_3d, theta_3d))  # transformation matrix
         points_s = np.dot(A, self.points_t).astype(np.float32)
+
+        offset = np.array([in_width / 2.0, in_height / 2.0], dtype=np.float32)
+        offset = offset.reshape(1, -1, 1)
+        points_s += offset
         return (points_s,)
 
     def backward(self, inputs, grad_outputs):
@@ -204,15 +214,21 @@ class GridGeneratorTranslation(Function):
 
 
 class GridGeneratorAffine(Function):
-    def __init__(self, grid_size):
+    def __init__(self, in_shape, out_shape):
         """
         Args:
-            grid_size (tuple): Shape (width, height) of target image.
+           in_shape (tuple): (height, width) of source image.
+
+           out_shape (tuple): (height, width) of target image.
         """
-        self.grid_size = grid_size
-        width, height = grid_size
-        x, y = np.meshgrid(np.arange(width), np.arange(height), indexing='xy')
-        one = np.ones(grid_size)
+        self.in_shape = in_shape
+        self.out_shape = out_shape
+        out_height, out_width = out_shape
+
+        x = np.arange(out_width) - (out_width - 1.0) / 2.0
+        y = np.arange(out_height) - (out_height - 1.0) / 2.0
+        x, y = np.meshgrid(x, y, indexing='xy')
+        one = np.ones(out_shape) * (out_width - 1.0) / 2.0
         # G in 3.2 "Parameterised Sampling Grid
         self.points_t = np.vstack((x.ravel(),
                                    y.ravel(),
@@ -231,10 +247,15 @@ class GridGeneratorAffine(Function):
     def forward(self, inputs):
         theta, = inputs
         batch_size = len(theta)
-        width, height = self.grid_size
+        in_height, in_width = self.in_shape
 
         A = theta.reshape(batch_size, 2, 3)
         points_s = np.dot(A, self.points_t).astype(np.float32)
+
+        offset = np.array([(in_height - 1.0) / 2.0,
+                           (in_width - 1.0) / 2.0], dtype=np.float32)
+        offset = offset.reshape(1, -1, 1)
+        points_s += offset
         return (points_s,)
 
     def backward(self, inputs, grad_outputs):
@@ -274,7 +295,7 @@ class SpatialTransformer(Function):
            out_shape (tuple): (height, width) of target image.
     """
     def __init__(self, in_shape, out_shape, transformation="translation",
-                 loc_net=None, centering=False):
+                 loc_net=None):
         assert len(in_shape) == 2, "in_shape must be (height, width)"
         assert len(out_shape) == 2, "out_shape must be (height, width)"
         self.in_shape = in_shape  # (height, width)
@@ -283,10 +304,10 @@ class SpatialTransformer(Function):
         # set number of parameters for transformation according to its type
         if transformation == "translation":
             self.theta_size = 2
-            self.grid_generator = GridGeneratorTranslation(out_shape)
+            self.grid_generator = GridGeneratorTranslation(in_shape, out_shape)
         if transformation == "affine":
             self.theta_size = 6
-            self.grid_generator = GridGeneratorAffine(out_shape)
+            self.grid_generator = GridGeneratorAffine(in_shape, out_shape)
 
         in_size = np.prod(in_shape)
         if loc_net is None:
@@ -296,10 +317,7 @@ class SpatialTransformer(Function):
 
         # set initial bias of the last layer of localization network
         theta_bias_init = self.loc_net.parameters[-1]
-        if centering:
-            translation_init = (np.array(in_shape) - np.array(out_shape)) / 2.0
-        else:
-            translation_init = np.zeros(2, dtype=np.float32)
+        translation_init = np.zeros(2, dtype=np.float32)
         if transformation == "translation":
             theta_bias_init[:] = translation_init
         if transformation == "affine":

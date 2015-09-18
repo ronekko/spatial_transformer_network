@@ -48,7 +48,7 @@ if __name__ == '__main__':
 #    t_test = Variable(t_test_data)
 
     model = FunctionSet(st=stm.SpatialTransformer(in_shape, out_shape,
-                                                  "affine", centering=True),
+                                                  "affine"),
                         fc1=F.Linear(out_size, 256),
                         fc2=F.Linear(256, 256),
                         fc3=F.Linear(256, 10))
