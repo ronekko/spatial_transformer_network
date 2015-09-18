@@ -228,7 +228,7 @@ class GridGeneratorAffine(Function):
         x = np.arange(out_width) - out_width / 2.0
         y = np.arange(out_height) - out_height / 2.0
         x, y = np.meshgrid(x, y, indexing='xy')
-        one = np.ones(out_shape)
+        one = np.ones(out_shape) * out_width / 2.0
         # G in 3.2 "Parameterised Sampling Grid
         self.points_t = np.vstack((x.ravel(),
                                    y.ravel(),
