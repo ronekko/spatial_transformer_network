@@ -225,10 +225,10 @@ class GridGeneratorAffine(Function):
         self.out_shape = out_shape
         out_height, out_width = out_shape
 
-        x = np.arange(out_width) - out_width / 2.0
-        y = np.arange(out_height) - out_height / 2.0
+        x = np.arange(out_width) - (out_width - 1.0) / 2.0
+        y = np.arange(out_height) - (out_height - 1.0) / 2.0
         x, y = np.meshgrid(x, y, indexing='xy')
-        one = np.ones(out_shape) * out_width / 2.0
+        one = np.ones(out_shape) * (out_width - 1.0) / 2.0
         # G in 3.2 "Parameterised Sampling Grid
         self.points_t = np.vstack((x.ravel(),
                                    y.ravel(),
@@ -252,7 +252,8 @@ class GridGeneratorAffine(Function):
         A = theta.reshape(batch_size, 2, 3)
         points_s = np.dot(A, self.points_t).astype(np.float32)
 
-        offset = np.array([in_height / 2.0, in_width / 2.0], dtype=np.float32)
+        offset = np.array([(in_height - 1.0) / 2.0,
+                           (in_width - 1.0) / 2.0], dtype=np.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
