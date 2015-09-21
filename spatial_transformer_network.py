@@ -331,11 +331,14 @@ class SpatialTransformer(Function):
     def check_type_forward(self, in_types):
         pass
 
-    def __call__(self, x):
+    def __call__(self, x, return_points=False):
         theta = self.loc_net(x)  # theta has the shape of (len(x), theta_size)
         points_s = self.grid_generator(theta)
         y = self.image_sampler(x, points_s)
-        return (y, theta)
+        if return_points:
+            return (y, theta, points_s)
+        else:
+            return (y, theta)
 
     @property
     def parameters(self):

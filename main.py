@@ -17,13 +17,13 @@ import spatial_transformer_network as stm
 
 def forward(model, x_batch, train=False):
     x = Variable(x_batch, volatile=not train)
-    x_st, theta = model.st(x)
+    x_st, theta, points = model.st(x, True)
     h = F.relu(model.fc1(x_st))
     h = F.dropout(h, train=train)
     h = F.relu(model.fc2(h))
     h = F.dropout(h, train=train)
     y = model.fc3(h)
-    return y, x_st, theta
+    return y, x_st, theta, points
 
 if __name__ == '__main__':
     try:
@@ -80,7 +80,7 @@ if __name__ == '__main__':
                 x_batch = x_train_data[indices]
                 t_batch = t_train_data[indices]
                 optimizer.zero_grads()
-                y, x_st, theta = forward(model, x_batch, train=True)
+                y, x_st, theta, points = forward(model, x_batch, train=True)
                 t = Variable(t_batch)
                 loss = F.softmax_cross_entropy(y, t)
                 accuracy = F.accuracy(y, t)
@@ -95,7 +95,8 @@ if __name__ == '__main__':
 
             train_loss = np.mean(losses)
             train_accuracy = np.mean(accuracies)
-            y_valid, x_st_valid, theta_valid = forward(model, x_valid_data)
+            (y_valid, x_st_valid,
+             theta_valid, points_valid) = forward(model, x_valid_data)
             t_valid = Variable(t_valid_data, volatile=True)
             valid_loss = F.softmax_cross_entropy(y_valid, t_valid).data
             valid_accuracy = F.accuracy(y_valid, t_valid).data
@@ -152,16 +153,29 @@ if __name__ == '__main__':
             plt.show()
             plt.draw()
 
-            print "model.theta.bias:", model.st.parameters[-1]
-#            print "theta:", theta.data[0]
-            print "theta:", theta_valid.data[0]
             fig = plt.figure()
             ax = fig.add_subplot(1, 2, 1)
-#            ax.matshow(x_batch[0].reshape(in_shape), cmap=plt.cm.gray)
-            ax.matshow(x_valid_data[0].reshape(in_shape), cmap=plt.cm.gray)
+            print "model.theta.bias:", model.st.parameters[-1]
+
+            print "theta:", theta.data[0]
+            ax.matshow(x_batch[0].reshape(in_shape), cmap=plt.cm.gray)
+            corners_x, corners_y = points.data[0][:, [0,
+                                                      out_shape[0] - 1,
+                                                      -1,
+                                                      -out_shape[0]]]
+#            print "theta:", theta_valid.data[0]
+#            ax.matshow(x_valid_data[0].reshape(in_shape), cmap=plt.cm.gray)
+#            corners_x, corners_y = points_valid.data[0][:, [0, 27, -1, -28]]
+            ax.plot(corners_x[[0, 1]], corners_y[[0, 1]])
+            ax.plot(corners_x[[1, 2]], corners_y[[1, 2]])
+            ax.plot(corners_x[[2, 3]], corners_y[[2, 3]])
+            ax.plot(corners_x[[0, 3]], corners_y[[0, 3]])
+            ax.set_xlim([0, 60])
+            ax.set_ylim([60, 0])
+
             ax = fig.add_subplot(1, 2, 2)
-#            ax.matshow(x_st.data[0].reshape(out_shape), cmap=plt.cm.gray)
-            ax.matshow(x_st_valid.data[0].reshape(out_shape), cmap=plt.cm.gray)
+            ax.matshow(x_st.data[0].reshape(out_shape), cmap=plt.cm.gray)
+#            ax.matshow(x_st_valid.data[0].reshape(out_shape), cmap=plt.cm.gray)
             plt.show()
             plt.draw()
 
