@@ -193,16 +193,18 @@ class GridGeneratorTranslation(Function):
         )
 
     def forward(self, inputs):
+        xp = cuda.get_array_module(*inputs)
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
 
-        eyes_3d = np.repeat(np.expand_dims(np.eye(2), 0), batch_size, axis=0)
-        theta_3d = np.expand_dims(theta, 2)
-        A = np.dstack((eyes_3d, theta_3d))  # transformation matrix
-        points_s = np.dot(A, self.points_t).astype(np.float32)
+        # use np.tile() because cupy.tile() has not been implemented yet
+        eyes_3d = xp.asarray(np.tile(np.eye(2), (batch_size, 1, 1)))
+        theta_3d = xp.expand_dims(theta, 2)
+        A = xp.dstack((eyes_3d, theta_3d))  # transformation matrix
+        points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = np.array([in_width / 2.0, in_height / 2.0], dtype=np.float32)
+        offset = xp.array([in_width / 2.0, in_height / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
@@ -245,15 +247,16 @@ class GridGeneratorAffine(Function):
         )
 
     def forward(self, inputs):
+        xp = cuda.get_array_module(*inputs)
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
 
         A = theta.reshape(batch_size, 2, 3)
-        points_s = np.dot(A, self.points_t).astype(np.float32)
+        points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = np.array([(in_height - 1.0) / 2.0,
-                           (in_width - 1.0) / 2.0], dtype=np.float32)
+        offset = xp.array([(in_height - 1.0) / 2.0,
+                           (in_width - 1.0) / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)

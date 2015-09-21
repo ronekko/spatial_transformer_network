@@ -173,6 +173,31 @@ class GridGeneratorTranslationTest(unittest.TestCase):
         assert points_s.dtype == expected_points_s.dtype
         assert points_s.shape == expected_points_s.shape
 
+    @attr.gpu
+    def test_grid_genarator_translation_forward_gpu(self):
+        # data
+        height, width  = (3, 4)
+        in_shape = (height, width)
+        out_shape = in_shape
+        theta = cupy.array([[1, 2], [30, 40], [500, 600]], dtype=cupy.float32)
+
+        # value calculated by GridGenerator
+        grid_generator = GridGeneratorTranslation(in_shape, out_shape)
+        grid_generator.to_gpu()
+        points_s = grid_generator(Variable(theta)).data.get()
+
+        # expected value
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        points_t = np.vstack((x.ravel(), y.ravel()))
+        expected_points_s = []
+        for theta_i in theta.get():
+            points_s_i = points_t + np.atleast_2d(theta_i).T
+            expected_points_s.append(points_s_i)
+        expected_points_s = np.array(expected_points_s).astype(np.float32)
+
+        assert np.all(points_s == expected_points_s)
+        assert points_s.dtype == expected_points_s.dtype
+        assert points_s.shape == expected_points_s.shape
 
 class ImageSamplerTest(unittest.TestCase):
     # TODO: Add test cases which some points are outside of the image region
