@@ -340,6 +340,18 @@ class SpatialTransformer(Function):
         else:
             return (y, theta)
 
+    def to_gpu(self, device=None):
+        self.loc_net.to_gpu(device)
+        self.grid_generator.to_gpu(device)
+        self.image_sampler.to_gpu(device)
+        return self
+
+    def to_cpu(self):
+        self.loc_net.to_cpu()
+        self.grid_generator.to_cpu()
+        self.image_sampler.to_cpu()
+        return self
+
     @property
     def parameters(self):
         return self.loc_net.parameters

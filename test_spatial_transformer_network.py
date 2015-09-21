@@ -9,6 +9,8 @@ import unittest
 import numpy as np
 from chainer import Variable
 from chainer import gradient_check
+from chainer.cuda import cupy
+from chainer.testing import attr
 from spatial_transformer_network import (
     SpatialTransformer, GridGeneratorTranslation, ImageSampler
 )
@@ -121,6 +123,29 @@ class SpatialTransformerTest(unittest.TestCase):
         out_shape = (2, 2)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         assert len(spatial_transformer.parameters) != 0
+
+    @attr.gpu
+    def test_spatial_transformer_to_gpu(self):
+        in_shape = (5, 5)
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+        spatial_transformer.to_gpu()
+        assert isinstance(spatial_transformer.grid_generator.points_t,
+                          cupy.ndarray)
+        assert all([isinstance(p, cupy.ndarray)
+            for p in spatial_transformer.loc_net.parameters])
+
+    @attr.gpu
+    def test_spatial_transformer_to_cpu(self):
+        in_shape = (5, 5)
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+        spatial_transformer.to_gpu()
+        spatial_transformer.to_cpu()
+        assert isinstance(spatial_transformer.grid_generator.points_t,
+                          np.ndarray)
+        assert all([isinstance(param, np.ndarray)
+            for param in spatial_transformer.loc_net.parameters])
 
 
 class GridGeneratorTranslationTest(unittest.TestCase):
