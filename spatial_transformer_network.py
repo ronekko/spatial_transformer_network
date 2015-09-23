@@ -15,6 +15,27 @@ from chainer import cuda, gradient_check
 from chainer.utils import type_check
 
 
+# TODO: write test
+_place_kernel = cuda.cupy.ElementwiseKernel(
+    'T a, S mask, T val',
+    'T out',
+    'out = mask ? val : a',
+    'cupy_place')
+
+
+# TODO: write test
+def cupy_place(arr, mask, val):
+    val = cuda.cupy.array(val, dtype=arr.dtype)
+    out = cuda.cupy.empty_like(arr)
+    return _place_kernel(arr, mask, val, out)
+
+
+# TODO: write test
+def apply_with_mask(arr, mask, elementwise_func, *args):
+    value = elementwise_func(arr, *args)
+    return cupy_place(arr, mask, value)
+
+
 def load_cluttered_mnist():
     FILE_NAME = "mnist_cluttered_60x60_6distortions.npz"
     DATA_URL = "https://s3.amazonaws.com/lasagne/recipes/datasets/" + FILE_NAME
