@@ -66,7 +66,7 @@ class ImageSampler(Function):
             points_type.shape[1] == 2
         )
 
-    def forward(self, inputs):
+    def forward_cpu(self, inputs):
         U, points = inputs
         batch_size, height, width = U.shape
 
@@ -122,6 +122,78 @@ class ImageSampler(Function):
         self.weight_x_h = weight_x_h
         self.weight_y_h = weight_y_h
         return (V,)
+
+    def forward_gpu(self, inputs):
+        xp = cuda.get_array_module(*inputs)
+        U, points = inputs
+        batch_size, height, width = U.shape
+
+        # Points just on the boundary are slightly (i.e. nextafter in float32)
+        # moved inward to simplify the implementation
+        points = points.copy()
+        on_boundary = (points == 0)
+        ret = apply_with_mask(points, on_boundary, xp.nextafter, xp.float32(1))
+        points = cupy_place(points, on_boundary, ret)
+        x = points[:, 0]
+        y = points[:, 1]
+        on_boundary = (x == (width - 1))
+        ret = apply_with_mask(x, on_boundary, xp.nextafter, xp.float32(0))
+        x = cupy_place(x, on_boundary, ret)
+        on_boundary = (y == (height - 1))
+        ret = apply_with_mask(y, on_boundary, xp.nextafter, xp.float32(0))
+        y = cupy_place(y, on_boundary, ret)
+
+        points_floor = xp.floor(points)
+        x_l = points_floor[:, 0].astype(xp.int32)
+        y_l = points_floor[:, 1].astype(xp.int32)
+        x_l = xp.clip(x_l, 0, width - 1)
+        y_l = xp.clip(y_l, 0, height - 1)
+        x_h = xp.clip(x_l + 1, 0, width - 1)
+        y_h = xp.clip(y_l + 1, 0, height - 1)
+
+        weight = xp.float32(1.0) - (points - points_floor)
+        weight_x_l = weight[:, 0]
+        weight_y_l = weight[:, 1]
+        weight_x_h = xp.float32(1.0) - weight_x_l
+        weight_y_h = xp.float32(1.0) - weight_y_l
+
+        # remove points outside of the (source) image region
+        # by setting their weights to 0
+        x_invalid = xp.logical_or(x < 0, (width - 1) < x)
+        y_invalid = xp.logical_or(y < 0, (height - 1) < y)
+        invalid = xp.logical_or(x_invalid, y_invalid)
+        weight_x_l = cupy_place(weight_x_l, invalid, 0)
+        weight_y_l = cupy_place(weight_y_l, invalid, 0)
+        weight_x_h = cupy_place(weight_x_h, invalid, 0)
+        weight_y_h = cupy_place(weight_y_h, invalid, 0)
+
+        size_U = width * height
+        size_V = points.shape[-1]
+        batch_index = xp.asarray(
+            np.repeat(np.arange(batch_size, dtype=np.int32), size_V))
+        index_ll = batch_index * size_U + y_l.ravel() * width + x_l.ravel()
+        U_ll = xp.take(U, index_ll).reshape((batch_size, -1))
+        index_hl = batch_index * size_U + y_l.ravel() * width + x_h.ravel()
+        U_lh = xp.take(U, index_hl).reshape((batch_size, -1))
+        index_lh = batch_index * size_U + y_h.ravel() * width + x_l.ravel()
+        U_hl = xp.take(U, index_lh).reshape((batch_size, -1))
+        index_hh = batch_index * size_U + y_h.ravel() * width + x_h.ravel()
+        U_hh = xp.take(U, index_hh).reshape((batch_size, -1))
+
+        U_y_l = weight_x_l * U_ll + weight_x_h * U_lh
+        U_y_h = weight_x_l * U_hl + weight_x_h * U_hh
+        V = weight_y_l * U_y_l + weight_y_h * U_y_h
+
+        self.x_l = x_l
+        self.y_l = y_l
+        self.x_h = x_h
+        self.y_h = y_h
+        self.weight_x_l = weight_x_l
+        self.weight_y_l = weight_y_l
+        self.weight_x_h = weight_x_h
+        self.weight_y_h = weight_y_h
+        return (V,)
+
 
     def backward(self, inputs, grad_outputs):
         U, points = inputs

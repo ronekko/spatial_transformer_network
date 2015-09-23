@@ -234,6 +234,39 @@ class ImageSamplerTest(unittest.TestCase):
         assert y.dtype == expected_y.dtype
         assert y.shape == expected_y.shape
 
+    @attr.gpu
+    def test_image_sampler_forward_gpu(self):
+        # data
+        x = cupy.arange(50, dtype=cupy.float32).reshape(2, 5, 5)
+        points = cupy.array([[[0, 1, 2, 3, 4],
+                              [3, 2, 1, 0, 4]],
+                             [[0.1, 1.3, 2.5, 3.7, 3.99],
+                              [0.1, 1.3, 2.5, 3, 3.99]]], dtype=cupy.float32)
+
+        # a
+        image_sampler = ImageSampler().to_gpu()
+        y = image_sampler(Variable(x), Variable(points)).data.get()
+        print y
+
+        # expected value
+        y0 = [15.0, 11.0, 7.0, 3.0, 24.0]
+        y1 = []
+        y1.append(0.9 * (0.9 * 25 + 0.1 * 26) +
+                  0.1 * (0.9 * 30 + 0.1 * 31))
+        y1.append(0.7 * (0.7 * 31 + 0.3 * 32) +
+                  0.3 * (0.7 * 36 + 0.3 * 37))
+        y1.append(0.5 * (0.5 * 37 + 0.5 * 38) +
+                  0.5 * (0.5 * 42 + 0.5 * 43))
+        y1.append(1.0 * (0.3 * 43 + 0.7 * 44) +
+                  0.0 * (0.3 * 48 + 0.7 * 49))
+        y1.append(0.01 * (0.01 * 43 + 0.99 * 44) +
+                  0.99 * (0.01 * 48 + 0.99 * 49))
+        expected_y = np.array([y0, y1], dtype=np.float32)
+        print expected_y
+
+        assert np.allclose(y, expected_y)
+        assert y.dtype == expected_y.dtype
+        assert y.shape == expected_y.shape
 
     def test_image_sampler_backward(self):
         x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
