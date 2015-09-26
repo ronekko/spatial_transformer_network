@@ -14,6 +14,7 @@ from chainer import optimizers
 from chainer import Variable, FunctionSet
 import spatial_transformer_network as stm
 
+np.random.seed(0)
 
 def forward(model, x_batch, train=False):
     x = Variable(x_batch, volatile=not train)
@@ -24,6 +25,39 @@ def forward(model, x_batch, train=False):
     h = F.dropout(h, train=train)
     y = model.fc3(h)
     return y, x_st, theta, points
+
+class SpatialTransformerNetwork(FunctionSet):
+    def __init__(self, in_shape, out_shape, trans_type="translation"):
+        assert trans_type in ["translation", "affine"]
+        sqrt2 = np.sqrt(2)
+        super(SpatialTransformerNetwork, self).__init__(
+            st=stm.SpatialTransformer(in_shape, out_shape, "affine"),
+            fc1=F.Linear(out_size, 256, wscale=sqrt2),
+            fc2=F.Linear(256, 256, wscale=sqrt2),
+            fc3=F.Linear(256, 10, wscale=sqrt2)
+        )
+
+    def forward(self, x_batch, train=False):
+        x = Variable(x_batch, volatile=not train)
+        x_st, theta, points = self.st(x, True)
+        h = F.relu(self.fc1(x_st))
+        h = F.dropout(h, train=train)
+        h = F.relu(self.fc2(h))
+        h = F.dropout(h, train=train)
+        y = self.fc3(h)
+        return y, x_st, theta, points
+
+    def compute_loss(self, x_batch, t_batch, train=False,
+                     return_variables=False):
+        y, x_st, theta, points = self.forward(x_batch, train=train)
+        t = Variable(t_batch, volatile=not train)
+        loss = F.softmax_cross_entropy(y, t)
+        accuracy = F.accuracy(y, t)
+        if return_variables:
+            return (loss, accuracy, (y, x_st, theta, points))
+        else:
+            return (loss, accuracy)
+
 
 if __name__ == '__main__':
     try:
@@ -40,18 +74,7 @@ if __name__ == '__main__':
     out_shape = (28, 28)
     out_size = np.prod(out_shape)  # 784
 
-#    x_train = Variable(x_train_data)
-#    t_train = Variable(t_train_data)
-#    x_valid = Variable(x_valid_data)
-#    t_valid = Variable(t_valid_data)
-#    x_test = Variable(x_test_data)
-#    t_test = Variable(t_test_data)
-
-    model = FunctionSet(st=stm.SpatialTransformer(in_shape, out_shape,
-                                                  "affine"),
-                        fc1=F.Linear(out_size, 256),
-                        fc2=F.Linear(256, 256),
-                        fc3=F.Linear(256, 10))
+    model = SpatialTransformerNetwork(in_shape, out_shape, "affine")
     initial_model = copy.deepcopy(model)
     optimizer = optimizers.Adam()
     optimizer.setup(model)
@@ -80,10 +103,9 @@ if __name__ == '__main__':
                 x_batch = x_train_data[indices]
                 t_batch = t_train_data[indices]
                 optimizer.zero_grads()
-                y, x_st, theta, points = forward(model, x_batch, train=True)
-                t = Variable(t_batch)
-                loss = F.softmax_cross_entropy(y, t)
-                accuracy = F.accuracy(y, t)
+                loss, accuracy, variables = model.compute_loss(
+                    x_batch, t_batch, train=True, return_variables=True)
+                y, x_st, theta, points = variables
                 losses.append(loss.data)
                 accuracies.append(accuracy.data)
                 loss.backward()
@@ -95,12 +117,13 @@ if __name__ == '__main__':
 
             train_loss = np.mean(losses)
             train_accuracy = np.mean(accuracies)
-            (y_valid, x_st_valid,
-             theta_valid, points_valid) = forward(model, x_valid_data)
-            t_valid = Variable(t_valid_data, volatile=True)
-            valid_loss = F.softmax_cross_entropy(y_valid, t_valid).data
-            valid_accuracy = F.accuracy(y_valid, t_valid).data
 
+            valid_loss, valid_accuracy, valid_variables = model.compute_loss(
+                x_valid_data, t_valid_data, train=False, return_variables=True)
+            y, x_st, theta, points = variables
+            y_valid, x_st_valid, theta_valid, points_valid = valid_variables
+
+            valid_loss, valid_accuracy = valid_loss.data, valid_accuracy.data
             if valid_loss < valid_loss_best:
                 model_best = copy.deepcopy(model)
                 valid_loss_best = valid_loss
