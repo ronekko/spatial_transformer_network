@@ -172,16 +172,16 @@ class ImageSampler(Function):
         batch_index = xp.asarray(
             np.repeat(np.arange(batch_size, dtype=np.int32), size_V))
         index_ll = batch_index * size_U + y_l.ravel() * width + x_l.ravel()
-        U_ll = xp.take(U, index_ll).reshape((batch_size, -1))
+        self.U_ll = xp.take(U, index_ll).reshape((batch_size, -1))
         index_hl = batch_index * size_U + y_l.ravel() * width + x_h.ravel()
-        U_lh = xp.take(U, index_hl).reshape((batch_size, -1))
+        self.U_lh = xp.take(U, index_hl).reshape((batch_size, -1))
         index_lh = batch_index * size_U + y_h.ravel() * width + x_l.ravel()
-        U_hl = xp.take(U, index_lh).reshape((batch_size, -1))
+        self.U_hl = xp.take(U, index_lh).reshape((batch_size, -1))
         index_hh = batch_index * size_U + y_h.ravel() * width + x_h.ravel()
-        U_hh = xp.take(U, index_hh).reshape((batch_size, -1))
+        self.U_hh = xp.take(U, index_hh).reshape((batch_size, -1))
 
-        U_y_l = weight_x_l * U_ll + weight_x_h * U_lh
-        U_y_h = weight_x_l * U_hl + weight_x_h * U_hh
+        U_y_l = weight_x_l * self.U_ll + weight_x_h * self.U_lh
+        U_y_h = weight_x_l * self.U_hl + weight_x_h * self.U_hh
         V = weight_y_l * U_y_l + weight_y_h * U_y_h
 
         self.x_l = x_l
@@ -194,8 +194,7 @@ class ImageSampler(Function):
         self.weight_y_h = weight_y_h
         return (V,)
 
-
-    def backward(self, inputs, grad_outputs):
+    def backward_cpu(self, inputs, grad_outputs):
         U, points = inputs
         gV, = grad_outputs
 
@@ -249,6 +248,63 @@ class ImageSampler(Function):
         gx = np.expand_dims(gx, 1)
         gy = np.expand_dims(gy, 1)
         gpoints = np.hstack((gx, gy))
+        # gpoints #######################################################
+
+        return (gU, gpoints)
+
+    def backward_gpu(self, inputs, grad_outputs):
+        xp = cuda.get_array_module(*inputs)
+        U, points = inputs
+        gV, = grad_outputs
+
+        x_l = self.x_l
+        y_l = self.y_l
+        x_h = self.x_h
+        y_h = self.y_h
+        weight_x_l = self.weight_x_l
+        weight_y_l = self.weight_y_l
+        weight_x_h = self.weight_x_h
+        weight_y_h = self.weight_y_h
+
+        batch_size, height, width = U.shape
+        dims = height * width
+
+        # gU ############################################################
+        i_ll = width * y_l + x_l  # i_ll.shape = (batch_size, dims)
+        i_lh = width * y_l + x_h
+        i_hl = width * y_h + x_l
+        i_hh = width * y_h + x_h
+        i = xp.hstack((i_ll, i_lh, i_hl, i_hh)).get()
+        w_ll = weight_y_l * weight_x_l * gV
+        w_lh = weight_y_l * weight_x_h * gV
+        w_hl = weight_y_h * weight_x_l * gV
+        w_hh = weight_y_h * weight_x_h * gV
+        w = xp.hstack((w_ll, w_lh, w_hl, w_hh)).get()
+
+        # compute gU with np.bincount on CPU then bring back it to GPU again
+        gU_flat = np.empty((batch_size, dims), dtype=np.float32)
+        for b in range(batch_size):
+            gU_flat[b] = np.bincount(i[b], weights=w[b], minlength=dims)
+        gU = xp.asarray(gU_flat.reshape(U.shape))
+        # gU ############################################################
+
+        # gpoints #######################################################
+        U_ll = self.U_ll
+        U_lh = self.U_lh
+        U_hl = self.U_hl
+        U_hh = self.U_hh
+
+        # y == weight_y_h, (1 - y) == weight_y_l
+        gx = weight_y_l * (U_lh - U_ll) + weight_y_h * (U_hh - U_hl)
+        gy = weight_x_l * (U_hl - U_ll) + weight_x_h * (U_hh - U_lh)
+
+        gx = gx * gV
+        gy = gy * gV
+
+        # shape o gx, gy: (N, P)
+        gx = xp.expand_dims(gx, 1)
+        gy = xp.expand_dims(gy, 1)
+        gpoints = xp.hstack((gx, gy))
         # gpoints #######################################################
 
         return (gU, gpoints)

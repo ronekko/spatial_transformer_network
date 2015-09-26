@@ -378,6 +378,38 @@ class ImageSamplerTest(unittest.TestCase):
         print "gpoints (numerical):", gpoints_numerical
         gradient_check.assert_allclose(points.grad, expected_gpoints)
 
+    @attr.gpu
+    def test_image_sampler_backward_gpu(self):
+        x_data = cupy.arange(50, dtype=cupy.float32).reshape(2, 5, 5)
+        points_data = cupy.array([[[1, 1, 2, 3],
+                                   [3, 2, 1, 1]],
+                                  [[0.2, 1.3, 2.5, 3.7],
+                                   [0.2, 1.3, 2.5, 3]]], dtype=cupy.float32)
+
+        x = Variable(x_data)
+        points = Variable(points_data)
+        image_sampler = ImageSampler()
+        image_sampler.to_gpu()
+        y = image_sampler(x, points)
+
+        func = lambda: image_sampler.forward((x_data, points_data))
+        y.grad = cupy.ones_like(y.data)
+        y.backward()
+        grad = gradient_check.numerical_grad(func,
+                                             (x_data, points_data),
+                                             (y.grad,),
+                                             eps=1e-1)
+        gx_numerical, gpoints_numerical = grad
+
+        print "Check gx:"
+        print "gx:", x.grad
+        print "gx (numerical):", gx_numerical
+        gradient_check.assert_allclose(x.grad, gx_numerical)
+        print "Check gpoints:"
+        print "gpoints:", points.grad
+        print "gpoints (numerical):", gpoints_numerical
+        gradient_check.assert_allclose(points.grad, gpoints_numerical)
+
 
 if __name__ == '__main__':
     unittest.main()
