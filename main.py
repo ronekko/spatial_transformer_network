@@ -5,6 +5,7 @@ Created on Mon Sep 14 21:17:12 2015
 @author: sakurai
 """
 
+import argparse
 import time
 import copy
 import numpy as np
@@ -12,9 +13,11 @@ import matplotlib.pyplot as plt
 import chainer.functions as F
 from chainer import optimizers
 from chainer import Variable, FunctionSet
+from chainer import cuda
 import spatial_transformer_network as stm
 
 np.random.seed(0)
+
 
 def forward(model, x_batch, train=False):
     x = Variable(x_batch, volatile=not train)
@@ -25,6 +28,7 @@ def forward(model, x_batch, train=False):
     h = F.dropout(h, train=train)
     y = model.fc3(h)
     return y, x_st, theta, points
+
 
 class SpatialTransformerNetwork(FunctionSet):
     def __init__(self, in_shape, out_shape, trans_type="translation"):
@@ -67,6 +71,18 @@ if __name__ == '__main__':
          x_valid_data, t_valid_data,
          x_test_data, t_test_data) = stm.load_cluttered_mnist()
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--gpu', '-g', default=-1, type=int,
+                        help='GPU ID (negative value indicates CPU)')
+    args = parser.parse_args()
+    if args.gpu >= 0:
+        cuda.check_cuda_available()
+    xp = cuda.cupy if args.gpu >= 0 else np
+
+    x_valid_data = cuda.to_cpu(x_valid_data)
+    t_valid_data = cuda.to_cpu(t_valid_data)
+    x_test_data = cuda.to_cpu(x_test_data)
+    t_test_data = cuda.to_cpu(t_test_data)
     num_train = len(x_train_data)
     num_valid = len(x_valid_data)
     num_test = len(x_test_data)
@@ -75,6 +91,12 @@ if __name__ == '__main__':
     out_size = np.prod(out_shape)  # 784
 
     model = SpatialTransformerNetwork(in_shape, out_shape, "affine")
+    if args.gpu >= 0:
+        model.to_gpu()
+        x_valid_data = cuda.to_gpu(x_valid_data)
+        t_valid_data = cuda.to_gpu(t_valid_data)
+        x_test_data = cuda.to_gpu(x_test_data)
+        t_test_data = cuda.to_gpu(t_test_data)
     initial_model = copy.deepcopy(model)
     optimizer = optimizers.Adam()
     optimizer.setup(model)
@@ -94,25 +116,26 @@ if __name__ == '__main__':
     try:
         for epoch in xrange(max_epochs):
             print "epoch", epoch,
-            time_begin = time.clock()
+            time_begin = time.time()
             losses = []
             accuracies = []
             gWs = 0
             perm = np.random.permutation(num_train)
             for indices in np.array_split(perm, num_batches):
-                x_batch = x_train_data[indices]
-                t_batch = t_train_data[indices]
-                optimizer.zero_grads()
+                x_batch = xp.asarray(x_train_data[indices])
+                t_batch = xp.asarray(t_train_data[indices])
                 loss, accuracy, variables = model.compute_loss(
                     x_batch, t_batch, train=True, return_variables=True)
                 y, x_st, theta, points = variables
-                losses.append(loss.data)
-                accuracies.append(accuracy.data)
+                optimizer.zero_grads()
                 loss.backward()
 #                optimizer.weight_decay(l2_reg)
 #                optimizer.clip_grads(500)
                 optimizer.update()
-                gWs += np.array([np.linalg.norm(w) for w in
+
+                losses.append(cuda.to_cpu(loss.data))
+                accuracies.append(cuda.to_cpu(accuracy.data))
+                gWs += np.array([np.linalg.norm(cuda.to_cpu(w)) for w in
                                  model.gradients[::2]])
 
             train_loss = np.mean(losses)
@@ -123,17 +146,18 @@ if __name__ == '__main__':
             y, x_st, theta, points = variables
             y_valid, x_st_valid, theta_valid, points_valid = valid_variables
 
-            valid_loss, valid_accuracy = valid_loss.data, valid_accuracy.data
+            valid_loss = cuda.to_cpu(valid_loss.data)
+            valid_accuracy = cuda.to_cpu(valid_accuracy.data)
             if valid_loss < valid_loss_best:
                 model_best = copy.deepcopy(model)
                 valid_loss_best = valid_loss
                 valid_accuracy_best = valid_accuracy
                 epoch_best = epoch
                 print "(Best score!)",
-            print "(time: %f)" % (time.clock() - time_begin)
+            print "(time: %f)" % (time.time() - time_begin)
 
             # print norms of the weights
-            print "    |W|", [np.linalg.norm(w) for w in
+            print "    |W|", [np.linalg.norm(cuda.to_cpu(w)) for w in
                               model.parameters[::2]]
             print "    |gW|", gWs.astype(np.float32).tolist()
 
@@ -181,11 +205,10 @@ if __name__ == '__main__':
             print "model.theta.bias:", model.st.parameters[-1]
 
             print "theta:", theta.data[0]
-            ax.matshow(x_batch[0].reshape(in_shape), cmap=plt.cm.gray)
-            corners_x, corners_y = points.data[0][:, [0,
-                                                      out_shape[0] - 1,
-                                                      -1,
-                                                      -out_shape[0]]]
+            ax.matshow(cuda.to_cpu(x_batch[0]).reshape(in_shape),
+                       cmap=plt.cm.gray)
+            corners_x, corners_y = cuda.to_cpu(points.data[0])[
+                :, [0, out_shape[0] - 1, -1, -out_shape[0]]]
 #            print "theta:", theta_valid.data[0]
 #            ax.matshow(x_valid_data[0].reshape(in_shape), cmap=plt.cm.gray)
 #            corners_x, corners_y = points_valid.data[0][:, [0, 27, -1, -28]]
@@ -197,7 +220,8 @@ if __name__ == '__main__':
             ax.set_ylim([60, 0])
 
             ax = fig.add_subplot(1, 2, 2)
-            ax.matshow(x_st.data[0].reshape(out_shape), cmap=plt.cm.gray)
+            ax.matshow(cuda.to_cpu(x_st.data[0]).reshape(out_shape),
+                       cmap=plt.cm.gray)
 #            ax.matshow(x_st_valid.data[0].reshape(out_shape), cmap=plt.cm.gray)
             plt.show()
             plt.draw()
