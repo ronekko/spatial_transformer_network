@@ -19,34 +19,55 @@ import spatial_transformer_network as stm
 np.random.seed(0)
 
 
-def forward(model, x_batch, train=False):
-    x = Variable(x_batch, volatile=not train)
-    x_st, theta, points = model.st(x, True)
-    h = F.relu(model.fc1(x_st))
-    h = F.dropout(h, train=train)
-    h = F.relu(model.fc2(h))
-    h = F.dropout(h, train=train)
-    y = model.fc3(h)
-    return y, x_st, theta, points
+class CNNLocalizationNetwork(FunctionSet):
+    def __init__(self, in_size, theta_size):
+        sqrt2 = np.sqrt(2)
+        super(CNNLocalizationNetwork, self).__init__(
+            conv1=F.Convolution2D(1, 20, 5, wscale=sqrt2),
+            conv2=F.Convolution2D(20, 20, 5, wscale=sqrt2),
+            fc3=F.Linear(1620, 20, wscale=sqrt2),
+            fc4=F.Linear(20, theta_size,
+                         initialW=np.zeros((theta_size, 20), dtype=np.float32))
+        )
+
+    def __call__(self, x, train=False):
+        if len(x.data.shape) == 3:
+            shape = x.data.shape
+            new_shape = shape[0:1] + (1,) + shape[1:]
+            x = F.reshape(x, new_shape)
+        h = F.max_pooling_2d(x, 2)
+        h = F.relu(self.conv1(h))
+        h = F.max_pooling_2d(h, 2)
+        h = F.relu(self.conv2(h))
+        h = F.relu(self.fc3(h))
+        theta = self.fc4(h)  # theta has the shape of (len(x), theta_size)
+        return theta
 
 
-class SpatialTransformerNetwork(FunctionSet):
+class SpatialTransformerNetworkCNN(FunctionSet):
     def __init__(self, in_shape, out_shape, trans_type="translation"):
         assert trans_type in ["translation", "affine"]
         sqrt2 = np.sqrt(2)
-        super(SpatialTransformerNetwork, self).__init__(
-            st=stm.SpatialTransformer(in_shape, out_shape, "affine"),
-            fc1=F.Linear(out_size, 256, wscale=sqrt2),
-            fc2=F.Linear(256, 256, wscale=sqrt2),
+        super(SpatialTransformerNetworkCNN, self).__init__(
+            st=stm.SpatialTransformer(in_shape, out_shape, "affine",
+                                      loc_net=CNNLocalizationNetwork),
+            conv1=F.Convolution2D(1, 64, 9, wscale=sqrt2),
+            conv2=F.Convolution2D(64, 64, 7, wscale=sqrt2),
             fc3=F.Linear(256, 10, wscale=sqrt2)
         )
 
     def forward(self, x_batch, train=False):
         x = Variable(x_batch, volatile=not train)
         x_st, theta, points = self.st(x, True)
-        h = F.relu(self.fc1(x_st))
+        if len(x_st.data.shape) == 2:
+            shape = x_st.data.shape
+            new_shape = shape[0:1] + (1,) + (28, 28)
+            x_st = F.reshape(x_st, new_shape)
+        h = F.relu(self.conv1(x_st))
+        h = F.max_pooling_2d(h, 2)
         h = F.dropout(h, train=train)
-        h = F.relu(self.fc2(h))
+        h = F.relu(self.conv2(h))
+        h = F.max_pooling_2d(h, 2)
         h = F.dropout(h, train=train)
         y = self.fc3(h)
         return y, x_st, theta, points
@@ -90,7 +111,7 @@ if __name__ == '__main__':
     out_shape = (28, 28)
     out_size = np.prod(out_shape)  # 784
 
-    model = SpatialTransformerNetwork(in_shape, out_shape, "affine")
+    model = SpatialTransformerNetworkCNN(in_shape, out_shape, "affine")
     if args.gpu >= 0:
         model.to_gpu()
         x_valid_data = cuda.to_gpu(x_valid_data)
@@ -98,7 +119,7 @@ if __name__ == '__main__':
         x_test_data = cuda.to_gpu(x_test_data)
         t_test_data = cuda.to_gpu(t_test_data)
     initial_model = copy.deepcopy(model)
-    optimizer = optimizers.Adam()
+    optimizer = optimizers.Adam(0.0005)
     optimizer.setup(model)
 
     batch_size = 250

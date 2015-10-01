@@ -9,6 +9,8 @@ import unittest
 import numpy as np
 from chainer import Variable
 from chainer import gradient_check
+from chainer.cuda import cupy
+from chainer.testing import attr
 from spatial_transformer_network import (
     SpatialTransformer, GridGeneratorTranslation, ImageSampler
 )
@@ -122,6 +124,29 @@ class SpatialTransformerTest(unittest.TestCase):
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         assert len(spatial_transformer.parameters) != 0
 
+    @attr.gpu
+    def test_spatial_transformer_to_gpu(self):
+        in_shape = (5, 5)
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+        spatial_transformer.to_gpu()
+        assert isinstance(spatial_transformer.grid_generator.points_t,
+                          cupy.ndarray)
+        assert all([isinstance(p, cupy.ndarray)
+            for p in spatial_transformer.loc_net.parameters])
+
+    @attr.gpu
+    def test_spatial_transformer_to_cpu(self):
+        in_shape = (5, 5)
+        out_shape = (2, 2)
+        spatial_transformer = SpatialTransformer(in_shape, out_shape)
+        spatial_transformer.to_gpu()
+        spatial_transformer.to_cpu()
+        assert isinstance(spatial_transformer.grid_generator.points_t,
+                          np.ndarray)
+        assert all([isinstance(param, np.ndarray)
+            for param in spatial_transformer.loc_net.parameters])
+
 
 class GridGeneratorTranslationTest(unittest.TestCase):
     def test_grid_genarator_translation_forward(self):
@@ -148,6 +173,31 @@ class GridGeneratorTranslationTest(unittest.TestCase):
         assert points_s.dtype == expected_points_s.dtype
         assert points_s.shape == expected_points_s.shape
 
+    @attr.gpu
+    def test_grid_genarator_translation_forward_gpu(self):
+        # data
+        height, width  = (3, 4)
+        in_shape = (height, width)
+        out_shape = in_shape
+        theta = cupy.array([[1, 2], [30, 40], [500, 600]], dtype=cupy.float32)
+
+        # value calculated by GridGenerator
+        grid_generator = GridGeneratorTranslation(in_shape, out_shape)
+        grid_generator.to_gpu()
+        points_s = grid_generator(Variable(theta)).data.get()
+
+        # expected value
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        points_t = np.vstack((x.ravel(), y.ravel()))
+        expected_points_s = []
+        for theta_i in theta.get():
+            points_s_i = points_t + np.atleast_2d(theta_i).T
+            expected_points_s.append(points_s_i)
+        expected_points_s = np.array(expected_points_s).astype(np.float32)
+
+        assert np.all(points_s == expected_points_s)
+        assert points_s.dtype == expected_points_s.dtype
+        assert points_s.shape == expected_points_s.shape
 
 class ImageSamplerTest(unittest.TestCase):
     # TODO: Add test cases which some points are outside of the image region
@@ -184,6 +234,39 @@ class ImageSamplerTest(unittest.TestCase):
         assert y.dtype == expected_y.dtype
         assert y.shape == expected_y.shape
 
+    @attr.gpu
+    def test_image_sampler_forward_gpu(self):
+        # data
+        x = cupy.arange(50, dtype=cupy.float32).reshape(2, 5, 5)
+        points = cupy.array([[[0, 1, 2, 3, 4],
+                              [3, 2, 1, 0, 4]],
+                             [[0.1, 1.3, 2.5, 3.7, 3.99],
+                              [0.1, 1.3, 2.5, 3, 3.99]]], dtype=cupy.float32)
+
+        # a
+        image_sampler = ImageSampler().to_gpu()
+        y = image_sampler(Variable(x), Variable(points)).data.get()
+        print y
+
+        # expected value
+        y0 = [15.0, 11.0, 7.0, 3.0, 24.0]
+        y1 = []
+        y1.append(0.9 * (0.9 * 25 + 0.1 * 26) +
+                  0.1 * (0.9 * 30 + 0.1 * 31))
+        y1.append(0.7 * (0.7 * 31 + 0.3 * 32) +
+                  0.3 * (0.7 * 36 + 0.3 * 37))
+        y1.append(0.5 * (0.5 * 37 + 0.5 * 38) +
+                  0.5 * (0.5 * 42 + 0.5 * 43))
+        y1.append(1.0 * (0.3 * 43 + 0.7 * 44) +
+                  0.0 * (0.3 * 48 + 0.7 * 49))
+        y1.append(0.01 * (0.01 * 43 + 0.99 * 44) +
+                  0.99 * (0.01 * 48 + 0.99 * 49))
+        expected_y = np.array([y0, y1], dtype=np.float32)
+        print expected_y
+
+        assert np.allclose(y, expected_y)
+        assert y.dtype == expected_y.dtype
+        assert y.shape == expected_y.shape
 
     def test_image_sampler_backward(self):
         x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
@@ -294,6 +377,38 @@ class ImageSamplerTest(unittest.TestCase):
         print "gpoints:", points.grad
         print "gpoints (numerical):", gpoints_numerical
         gradient_check.assert_allclose(points.grad, expected_gpoints)
+
+    @attr.gpu
+    def test_image_sampler_backward_gpu(self):
+        x_data = cupy.arange(50, dtype=cupy.float32).reshape(2, 5, 5)
+        points_data = cupy.array([[[1, 1, 2, 3],
+                                   [3, 2, 1, 1]],
+                                  [[0.2, 1.3, 2.5, 3.7],
+                                   [0.2, 1.3, 2.5, 3]]], dtype=cupy.float32)
+
+        x = Variable(x_data)
+        points = Variable(points_data)
+        image_sampler = ImageSampler()
+        image_sampler.to_gpu()
+        y = image_sampler(x, points)
+
+        func = lambda: image_sampler.forward((x_data, points_data))
+        y.grad = cupy.ones_like(y.data)
+        y.backward()
+        grad = gradient_check.numerical_grad(func,
+                                             (x_data, points_data),
+                                             (y.grad,),
+                                             eps=1e-1)
+        gx_numerical, gpoints_numerical = grad
+
+        print "Check gx:"
+        print "gx:", x.grad
+        print "gx (numerical):", gx_numerical
+        gradient_check.assert_allclose(x.grad, gx_numerical)
+        print "Check gpoints:"
+        print "gpoints:", points.grad
+        print "gpoints (numerical):", gpoints_numerical
+        gradient_check.assert_allclose(points.grad, gpoints_numerical)
 
 
 if __name__ == '__main__':

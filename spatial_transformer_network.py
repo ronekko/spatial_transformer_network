@@ -15,6 +15,27 @@ from chainer import cuda, gradient_check
 from chainer.utils import type_check
 
 
+# TODO: write test
+_place_kernel = cuda.cupy.ElementwiseKernel(
+    'T a, S mask, T val',
+    'T out',
+    'out = mask ? val : a',
+    'cupy_place')
+
+
+# TODO: write test
+def cupy_place(arr, mask, val):
+    val = cuda.cupy.array(val, dtype=arr.dtype)
+    out = cuda.cupy.empty_like(arr)
+    return _place_kernel(arr, mask, val, out)
+
+
+# TODO: write test
+def apply_with_mask(arr, mask, elementwise_func, *args):
+    value = elementwise_func(arr, *args)
+    return cupy_place(arr, mask, value)
+
+
 def load_cluttered_mnist():
     FILE_NAME = "mnist_cluttered_60x60_6distortions.npz"
     DATA_URL = "https://s3.amazonaws.com/lasagne/recipes/datasets/" + FILE_NAME
@@ -45,7 +66,7 @@ class ImageSampler(Function):
             points_type.shape[1] == 2
         )
 
-    def forward(self, inputs):
+    def forward_cpu(self, inputs):
         U, points = inputs
         batch_size, height, width = U.shape
 
@@ -102,7 +123,78 @@ class ImageSampler(Function):
         self.weight_y_h = weight_y_h
         return (V,)
 
-    def backward(self, inputs, grad_outputs):
+    def forward_gpu(self, inputs):
+        xp = cuda.get_array_module(*inputs)
+        U, points = inputs
+        batch_size, height, width = U.shape
+
+        # Points just on the boundary are slightly (i.e. nextafter in float32)
+        # moved inward to simplify the implementation
+        points = points.copy()
+        on_boundary = (points == 0)
+        ret = apply_with_mask(points, on_boundary, xp.nextafter, xp.float32(1))
+        points = cupy_place(points, on_boundary, ret)
+        x = points[:, 0]
+        y = points[:, 1]
+        on_boundary = (x == (width - 1))
+        ret = apply_with_mask(x, on_boundary, xp.nextafter, xp.float32(0))
+        x = cupy_place(x, on_boundary, ret)
+        on_boundary = (y == (height - 1))
+        ret = apply_with_mask(y, on_boundary, xp.nextafter, xp.float32(0))
+        y = cupy_place(y, on_boundary, ret)
+
+        points_floor = xp.floor(points)
+        x_l = points_floor[:, 0].astype(xp.int32)
+        y_l = points_floor[:, 1].astype(xp.int32)
+        x_l = xp.clip(x_l, 0, width - 1)
+        y_l = xp.clip(y_l, 0, height - 1)
+        x_h = xp.clip(x_l + 1, 0, width - 1)
+        y_h = xp.clip(y_l + 1, 0, height - 1)
+
+        weight = xp.float32(1.0) - (points - points_floor)
+        weight_x_l = weight[:, 0]
+        weight_y_l = weight[:, 1]
+        weight_x_h = xp.float32(1.0) - weight_x_l
+        weight_y_h = xp.float32(1.0) - weight_y_l
+
+        # remove points outside of the (source) image region
+        # by setting their weights to 0
+        x_invalid = xp.logical_or(x < 0, (width - 1) < x)
+        y_invalid = xp.logical_or(y < 0, (height - 1) < y)
+        invalid = xp.logical_or(x_invalid, y_invalid)
+        weight_x_l = cupy_place(weight_x_l, invalid, 0)
+        weight_y_l = cupy_place(weight_y_l, invalid, 0)
+        weight_x_h = cupy_place(weight_x_h, invalid, 0)
+        weight_y_h = cupy_place(weight_y_h, invalid, 0)
+
+        size_U = width * height
+        size_V = points.shape[-1]
+        batch_index = xp.asarray(
+            np.repeat(np.arange(batch_size, dtype=np.int32), size_V))
+        index_ll = batch_index * size_U + y_l.ravel() * width + x_l.ravel()
+        self.U_ll = xp.take(U, index_ll).reshape((batch_size, -1))
+        index_hl = batch_index * size_U + y_l.ravel() * width + x_h.ravel()
+        self.U_lh = xp.take(U, index_hl).reshape((batch_size, -1))
+        index_lh = batch_index * size_U + y_h.ravel() * width + x_l.ravel()
+        self.U_hl = xp.take(U, index_lh).reshape((batch_size, -1))
+        index_hh = batch_index * size_U + y_h.ravel() * width + x_h.ravel()
+        self.U_hh = xp.take(U, index_hh).reshape((batch_size, -1))
+
+        U_y_l = weight_x_l * self.U_ll + weight_x_h * self.U_lh
+        U_y_h = weight_x_l * self.U_hl + weight_x_h * self.U_hh
+        V = weight_y_l * U_y_l + weight_y_h * U_y_h
+
+        self.x_l = x_l
+        self.y_l = y_l
+        self.x_h = x_h
+        self.y_h = y_h
+        self.weight_x_l = weight_x_l
+        self.weight_y_l = weight_y_l
+        self.weight_x_h = weight_x_h
+        self.weight_y_h = weight_y_h
+        return (V,)
+
+    def backward_cpu(self, inputs, grad_outputs):
         U, points = inputs
         gV, = grad_outputs
 
@@ -160,6 +252,63 @@ class ImageSampler(Function):
 
         return (gU, gpoints)
 
+    def backward_gpu(self, inputs, grad_outputs):
+        xp = cuda.get_array_module(*inputs)
+        U, points = inputs
+        gV, = grad_outputs
+
+        x_l = self.x_l
+        y_l = self.y_l
+        x_h = self.x_h
+        y_h = self.y_h
+        weight_x_l = self.weight_x_l
+        weight_y_l = self.weight_y_l
+        weight_x_h = self.weight_x_h
+        weight_y_h = self.weight_y_h
+
+        batch_size, height, width = U.shape
+        dims = height * width
+
+        # gU ############################################################
+        i_ll = width * y_l + x_l  # i_ll.shape = (batch_size, dims)
+        i_lh = width * y_l + x_h
+        i_hl = width * y_h + x_l
+        i_hh = width * y_h + x_h
+        i = xp.hstack((i_ll, i_lh, i_hl, i_hh)).get()
+        w_ll = weight_y_l * weight_x_l * gV
+        w_lh = weight_y_l * weight_x_h * gV
+        w_hl = weight_y_h * weight_x_l * gV
+        w_hh = weight_y_h * weight_x_h * gV
+        w = xp.hstack((w_ll, w_lh, w_hl, w_hh)).get()
+
+        # compute gU with np.bincount on CPU then bring back it to GPU again
+        gU_flat = np.empty((batch_size, dims), dtype=np.float32)
+        for b in range(batch_size):
+            gU_flat[b] = np.bincount(i[b], weights=w[b], minlength=dims)
+        gU = xp.asarray(gU_flat.reshape(U.shape))
+        # gU ############################################################
+
+        # gpoints #######################################################
+        U_ll = self.U_ll
+        U_lh = self.U_lh
+        U_hl = self.U_hl
+        U_hh = self.U_hh
+
+        # y == weight_y_h, (1 - y) == weight_y_l
+        gx = weight_y_l * (U_lh - U_ll) + weight_y_h * (U_hh - U_hl)
+        gy = weight_x_l * (U_hl - U_ll) + weight_x_h * (U_hh - U_lh)
+
+        gx = gx * gV
+        gy = gy * gV
+
+        # shape o gx, gy: (N, P)
+        gx = xp.expand_dims(gx, 1)
+        gy = xp.expand_dims(gy, 1)
+        gpoints = xp.hstack((gx, gy))
+        # gpoints #######################################################
+
+        return (gU, gpoints)
+
 
 class GridGeneratorTranslation(Function):
     def __init__(self, in_shape, out_shape):
@@ -193,16 +342,18 @@ class GridGeneratorTranslation(Function):
         )
 
     def forward(self, inputs):
+        xp = cuda.get_array_module(*inputs)
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
 
-        eyes_3d = np.repeat(np.expand_dims(np.eye(2), 0), batch_size, axis=0)
-        theta_3d = np.expand_dims(theta, 2)
-        A = np.dstack((eyes_3d, theta_3d))  # transformation matrix
-        points_s = np.dot(A, self.points_t).astype(np.float32)
+        # use np.tile() because cupy.tile() has not been implemented yet
+        eyes_3d = xp.asarray(np.tile(np.eye(2), (batch_size, 1, 1)))
+        theta_3d = xp.expand_dims(theta, 2)
+        A = xp.dstack((eyes_3d, theta_3d))  # transformation matrix
+        points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = np.array([in_width / 2.0, in_height / 2.0], dtype=np.float32)
+        offset = xp.array([in_width / 2.0, in_height / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
@@ -245,15 +396,16 @@ class GridGeneratorAffine(Function):
         )
 
     def forward(self, inputs):
+        xp = cuda.get_array_module(*inputs)
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
 
         A = theta.reshape(batch_size, 2, 3)
-        points_s = np.dot(A, self.points_t).astype(np.float32)
+        points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = np.array([(in_height - 1.0) / 2.0,
-                           (in_width - 1.0) / 2.0], dtype=np.float32)
+        offset = xp.array([(in_height - 1.0) / 2.0,
+                           (in_width - 1.0) / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
@@ -295,7 +447,7 @@ class SpatialTransformer(Function):
            out_shape (tuple): (height, width) of target image.
     """
     def __init__(self, in_shape, out_shape, transformation="translation",
-                 loc_net=None):
+                 loc_net_class=None):
         assert len(in_shape) == 2, "in_shape must be (height, width)"
         assert len(out_shape) == 2, "out_shape must be (height, width)"
         self.in_shape = in_shape  # (height, width)
@@ -310,10 +462,9 @@ class SpatialTransformer(Function):
             self.grid_generator = GridGeneratorAffine(in_shape, out_shape)
 
         in_size = np.prod(in_shape)
-        if loc_net is None:
-            self.loc_net = FCLocalizationNetwork(in_size, self.theta_size)
-        else:
-            self.loc_net = loc_net
+        if loc_net_class is None:
+            loc_net_class = FCLocalizationNetwork
+        self.loc_net = loc_net_class(in_size, self.theta_size)
 
         # set initial bias of the last layer of localization network
         theta_bias_init = self.loc_net.parameters[-1]
@@ -339,6 +490,18 @@ class SpatialTransformer(Function):
             return (y, theta, points_s)
         else:
             return (y, theta)
+
+    def to_gpu(self, device=None):
+        self.loc_net.to_gpu(device)
+        self.grid_generator.to_gpu(device)
+        self.image_sampler.to_gpu(device)
+        return self
+
+    def to_cpu(self):
+        self.loc_net.to_cpu()
+        self.grid_generator.to_cpu()
+        self.image_sampler.to_cpu()
+        return self
 
     @property
     def parameters(self):
