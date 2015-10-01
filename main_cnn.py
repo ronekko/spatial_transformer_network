@@ -50,7 +50,7 @@ class SpatialTransformerNetworkCNN(FunctionSet):
         sqrt2 = np.sqrt(2)
         super(SpatialTransformerNetworkCNN, self).__init__(
             st=stm.SpatialTransformer(in_shape, out_shape, "affine",
-                                      loc_net=CNNLocalizationNetwork),
+                                      loc_net_class=CNNLocalizationNetwork),
             conv1=F.Convolution2D(1, 64, 9, wscale=sqrt2),
             conv2=F.Convolution2D(64, 64, 7, wscale=sqrt2),
             fc3=F.Linear(256, 10, wscale=sqrt2)
