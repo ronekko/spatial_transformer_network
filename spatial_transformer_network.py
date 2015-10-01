@@ -447,7 +447,7 @@ class SpatialTransformer(Function):
            out_shape (tuple): (height, width) of target image.
     """
     def __init__(self, in_shape, out_shape, transformation="translation",
-                 loc_net=None):
+                 loc_net_class=None):
         assert len(in_shape) == 2, "in_shape must be (height, width)"
         assert len(out_shape) == 2, "out_shape must be (height, width)"
         self.in_shape = in_shape  # (height, width)
@@ -462,10 +462,9 @@ class SpatialTransformer(Function):
             self.grid_generator = GridGeneratorAffine(in_shape, out_shape)
 
         in_size = np.prod(in_shape)
-        if loc_net is None:
-            self.loc_net = FCLocalizationNetwork(in_size, self.theta_size)
-        else:
-            self.loc_net = loc_net
+        if loc_net_class is None:
+            loc_net_class = FCLocalizationNetwork
+        self.loc_net = loc_net_class(in_size, self.theta_size)
 
         # set initial bias of the last layer of localization network
         theta_bias_init = self.loc_net.parameters[-1]
