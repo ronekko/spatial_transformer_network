@@ -40,30 +40,30 @@ class SpatialTransformerTest(unittest.TestCase):
                                [31, 32, 33,
                                 36, 37, 38,
                                 41, 42, 43]], dtype=np.float32)
+        self.assertEqual(y.data.dtype, expected_y.dtype)
+        self.assertEqual(y.data.shape, expected_y.shape)
         assert np.allclose(y.data, expected_y)
-        assert y.data.dtype == expected_y.dtype
-        assert y.data.shape == expected_y.shape
 
         # theta (data)
         expected_theta = np.array([[0, 0],
                                    [0, 0]], dtype=np.float32)
+        self.assertEqual(theta.data.dtype, expected_theta.dtype)
+        self.assertEqual(theta.data.shape, expected_theta.shape)
         assert np.allclose(theta.data, expected_theta)
-        assert theta.data.dtype == expected_theta.dtype
-        assert theta.data.shape == expected_theta.shape
 
         # theta (gradient)
         expected_gtheta = np.array([[9, 45],
                                     [9, 45]], dtype=np.float32)
+        self.assertEqual(theta.grad.dtype, expected_gtheta.dtype)
+        self.assertEqual(theta.grad.shape, expected_gtheta.shape)
         assert np.allclose(theta.grad, expected_gtheta)
-        assert theta.grad.dtype == expected_gtheta.dtype
-        assert theta.grad.shape == expected_gtheta.shape
 
         # x (gradient)
         expected_gx = np.zeros_like(x_data)
         expected_gx[:, 1:4, 1:4] = 1
+        self.assertEqual(x.grad.dtype, expected_gx.dtype)
+        self.assertEqual(x.grad.shape, expected_gx.shape)
         assert np.allclose(x.grad, expected_gx)
-        assert x.grad.dtype == expected_gx.dtype
-        assert x.grad.shape == expected_gx.shape
 
 
     def test_spatial_transformer_call2(self):
@@ -91,20 +91,20 @@ class SpatialTransformerTest(unittest.TestCase):
                                 3, 1, 1, 3,
                                 5, 3, 3, 5]], dtype=np.float32)
         assert np.allclose(y.data, expected_y)
-        assert y.data.dtype == expected_y.dtype
-        assert y.data.shape == expected_y.shape
+        self.assertEqual(y.data.dtype, expected_y.dtype)
+        self.assertEqual(y.data.shape, expected_y.shape)
 
         # theta (data)
         expected_theta = np.array([[0, 0]], dtype=np.float32)
         assert np.allclose(theta.data, expected_theta)
-        assert theta.data.dtype == expected_theta.dtype
-        assert theta.data.shape == expected_theta.shape
+        self.assertEqual(theta.data.dtype, expected_theta.dtype)
+        self.assertEqual(theta.data.shape, expected_theta.shape)
 
         # theta (gradient)
         expected_gtheta = np.array([[0, 0]], dtype=np.float32)
         assert np.allclose(theta.grad, expected_gtheta)
-        assert theta.grad.dtype == expected_gtheta.dtype
-        assert theta.grad.shape == expected_gtheta.shape
+        self.assertEqual(theta.grad.dtype, expected_gtheta.dtype)
+        self.assertEqual(theta.grad.shape, expected_gtheta.shape)
 
         # x (gradient)
         expected_gx = np.zeros_like(x_data)
@@ -114,15 +114,15 @@ class SpatialTransformerTest(unittest.TestCase):
         for i, j in zip(ii.ravel(), jj.ravel()):
             expected_gx[0, i:i+2, j:j+2] += np.full((2, 2), 0.25)
         assert np.allclose(x.grad, expected_gx)
-        assert x.grad.dtype == expected_gx.dtype
-        assert x.grad.shape == expected_gx.shape
+        self.assertEqual(x.grad.dtype, expected_gx.dtype)
+        self.assertEqual(x.grad.shape, expected_gx.shape)
 
 
     def test_spatial_transformer_parameteres(self):
         in_shape = (5, 5)
         out_shape = (2, 2)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
-        assert len(spatial_transformer.parameters) != 0
+        self.assertNotEqual(len(spatial_transformer.parameters), 0)
 
     @attr.gpu
     def test_spatial_transformer_to_gpu(self):
@@ -130,10 +130,10 @@ class SpatialTransformerTest(unittest.TestCase):
         out_shape = (2, 2)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         spatial_transformer.to_gpu()
-        assert isinstance(spatial_transformer.grid_generator.points_t,
-                          cupy.ndarray)
-        assert all([isinstance(p, cupy.ndarray)
-            for p in spatial_transformer.loc_net.parameters])
+        self.assertIsInstance(spatial_transformer.grid_generator.points_t,
+                              cupy.ndarray)
+        self.assertTrue(all([isinstance(p, cupy.ndarray)
+            for p in spatial_transformer.loc_net.parameters]))
 
     @attr.gpu
     def test_spatial_transformer_to_cpu(self):
@@ -142,10 +142,10 @@ class SpatialTransformerTest(unittest.TestCase):
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         spatial_transformer.to_gpu()
         spatial_transformer.to_cpu()
-        assert isinstance(spatial_transformer.grid_generator.points_t,
-                          np.ndarray)
-        assert all([isinstance(param, np.ndarray)
-            for param in spatial_transformer.loc_net.parameters])
+        self.assertIsInstance(spatial_transformer.grid_generator.points_t,
+                              np.ndarray)
+        self.assertTrue(all([isinstance(param, np.ndarray)
+            for param in spatial_transformer.loc_net.parameters]))
 
 
 class GridGeneratorTranslationTest(unittest.TestCase):
@@ -170,8 +170,8 @@ class GridGeneratorTranslationTest(unittest.TestCase):
         expected_points_s = np.array(expected_points_s).astype(np.float32)
 
         assert np.all(points_s == expected_points_s)
-        assert points_s.dtype == expected_points_s.dtype
-        assert points_s.shape == expected_points_s.shape
+        self.assertEqual(points_s.dtype, expected_points_s.dtype)
+        self.assertEqual(points_s.shape, expected_points_s.shape)
 
     @attr.gpu
     def test_grid_genarator_translation_forward_gpu(self):
@@ -196,8 +196,9 @@ class GridGeneratorTranslationTest(unittest.TestCase):
         expected_points_s = np.array(expected_points_s).astype(np.float32)
 
         assert np.all(points_s == expected_points_s)
-        assert points_s.dtype == expected_points_s.dtype
-        assert points_s.shape == expected_points_s.shape
+        self.assertEqual(points_s.dtype, expected_points_s.dtype)
+        self.assertEqual(points_s.shape, expected_points_s.shape)
+
 
 class ImageSamplerTest(unittest.TestCase):
     # TODO: Add test cases which some points are outside of the image region
@@ -230,9 +231,9 @@ class ImageSamplerTest(unittest.TestCase):
         expected_y = np.array([y0, y1], dtype=np.float32)
         print expected_y
 
+        self.assertEqual(y.dtype, expected_y.dtype)
+        self.assertEqual(y.shape, expected_y.shape)
         assert np.allclose(y, expected_y)
-        assert y.dtype == expected_y.dtype
-        assert y.shape == expected_y.shape
 
     @attr.gpu
     def test_image_sampler_forward_gpu(self):
@@ -265,8 +266,8 @@ class ImageSamplerTest(unittest.TestCase):
         print expected_y
 
         assert np.allclose(y, expected_y)
-        assert y.dtype == expected_y.dtype
-        assert y.shape == expected_y.shape
+        self.assertEqual(y.dtype, expected_y.dtype)
+        self.assertEqual(y.shape, expected_y.shape)
 
     def test_image_sampler_backward(self):
         x_data = np.arange(50, dtype=np.float32).reshape(2, 5, 5)
@@ -326,8 +327,8 @@ class ImageSamplerTest(unittest.TestCase):
         y = y.ravel()
         points_data.append([x, y])
         points_data = np.array(points_data, dtype=np.float32)
-        assert points_data.shape == (3, 2, 9)
-        assert points_data.dtype == np.float32
+        self.assertEqual(points_data.shape, (3, 2, 9))
+        self.assertEqual(points_data.dtype, np.float32)
         print points_data
 
         # model
@@ -346,8 +347,8 @@ class ImageSamplerTest(unittest.TestCase):
                                [0, 0, 0, 0, 0, 0, 0, 0, 0]],
                               dtype=np.float32)
         gradient_check.assert_allclose(y.data, expected_y)
-        assert y.data.dtype == expected_y.dtype
-        assert y.data.shape == expected_y.shape
+        self.assertEqual(y.data.dtype, expected_y.dtype)
+        self.assertEqual(y.data.shape, expected_y.shape)
 
         func = lambda: image_sampler.forward((x_data, points_data))
         y.grad = np.ones_like(y.data)
