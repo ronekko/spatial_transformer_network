@@ -208,7 +208,7 @@ if __name__ == '__main__':
             ax.matshow(cuda.to_cpu(x_batch[0]).reshape(in_shape),
                        cmap=plt.cm.gray)
             corners_x, corners_y = cuda.to_cpu(points.data[0])[
-                :, [0, out_shape[0] - 1, -1, -out_shape[0]]]
+                :, [0, out_shape[1] - 1, -1, - out_shape[1]]]
 #            print "theta:", theta_valid.data[0]
 #            ax.matshow(x_valid_data[0].reshape(in_shape), cmap=plt.cm.gray)
 #            corners_x, corners_y = points_valid.data[0][:, [0, 27, -1, -28]]
