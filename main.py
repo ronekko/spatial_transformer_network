@@ -34,6 +34,7 @@ class SpatialTransformerNetwork(FunctionSet):
     def __init__(self, in_shape, out_shape, trans_type="translation"):
         assert trans_type in ["translation", "affine"]
         sqrt2 = np.sqrt(2)
+        out_size = np.prod(out_shape)
         super(SpatialTransformerNetwork, self).__init__(
             st=stm.SpatialTransformer(in_shape, out_shape, "affine"),
             fc1=F.Linear(out_size, 256, wscale=sqrt2),
@@ -88,7 +89,6 @@ if __name__ == '__main__':
     num_test = len(x_test_data)
     in_shape = x_train_data.shape[1:]
     out_shape = (28, 28)
-    out_size = np.prod(out_shape)  # 784
 
     model = SpatialTransformerNetwork(in_shape, out_shape, "affine")
     if args.gpu >= 0:
