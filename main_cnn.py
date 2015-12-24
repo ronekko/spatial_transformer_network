@@ -36,8 +36,8 @@ class CNNLocalizationNetwork(ChainList):
             new_shape = shape[0:1] + (1,) + shape[1:]
             x = F.reshape(x, new_shape)
         h = F.max_pooling_2d(x, 2)
-        h = F.relu(self[0](h))
-        h = F.max_pooling_2d(h, 2)
+        h = F.max_pooling_2d(self[0](h), 2)
+        h = F.relu(h)
         h = F.relu(self[1](h))
         h = F.relu(self[2](h))
         theta = self[3](h)  # theta has the shape of (len(x), theta_size)
@@ -63,11 +63,11 @@ class SpatialTransformerNetworkCNN(Chain):
             shape = x_st.data.shape
             new_shape = shape[0:1] + (1,) + (28, 28)
             x_st = F.reshape(x_st, new_shape)
-        h = F.relu(self.conv1(x_st))
-        h = F.max_pooling_2d(h, 2)
+        h = F.max_pooling_2d(self.conv1(x_st), 2)
+        h = F.relu(h)
         h = F.dropout(h, train=train)
-        h = F.relu(self.conv2(h))
-        h = F.max_pooling_2d(h, 2)
+        h = F.max_pooling_2d(self.conv2(h), 2)
+        h = F.relu(h)
         h = F.dropout(h, train=train)
         y = self.fc3(h)
         return y, x_st, theta, points
