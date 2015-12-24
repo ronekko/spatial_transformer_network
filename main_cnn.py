@@ -12,22 +12,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 import chainer.functions as F
 from chainer import optimizers
-from chainer import Variable, FunctionSet
+from chainer import Variable, Chain, ChainList
 from chainer import cuda
 import spatial_transformer_network as stm
 
 np.random.seed(0)
 
 
-class CNNLocalizationNetwork(FunctionSet):
+class CNNLocalizationNetwork(ChainList):
     def __init__(self, in_size, theta_size):
         sqrt2 = np.sqrt(2)
         super(CNNLocalizationNetwork, self).__init__(
-            conv1=F.Convolution2D(1, 20, 5, wscale=sqrt2),
-            conv2=F.Convolution2D(20, 20, 5, wscale=sqrt2),
-            fc3=F.Linear(1620, 20, wscale=sqrt2),
-            fc4=F.Linear(20, theta_size,
-                         initialW=np.zeros((theta_size, 20), dtype=np.float32))
+            F.Convolution2D(1, 20, 5, wscale=sqrt2),
+            F.Convolution2D(20, 20, 5, wscale=sqrt2),
+            F.Linear(1620, 20, wscale=sqrt2),
+            F.Linear(20, theta_size,
+                     initialW=np.zeros((theta_size, 20), dtype=np.float32))
         )
 
     def __call__(self, x, train=False):
@@ -36,15 +36,15 @@ class CNNLocalizationNetwork(FunctionSet):
             new_shape = shape[0:1] + (1,) + shape[1:]
             x = F.reshape(x, new_shape)
         h = F.max_pooling_2d(x, 2)
-        h = F.relu(self.conv1(h))
+        h = F.relu(self[0](h))
         h = F.max_pooling_2d(h, 2)
-        h = F.relu(self.conv2(h))
-        h = F.relu(self.fc3(h))
-        theta = self.fc4(h)  # theta has the shape of (len(x), theta_size)
+        h = F.relu(self[1](h))
+        h = F.relu(self[2](h))
+        theta = self[3](h)  # theta has the shape of (len(x), theta_size)
         return theta
 
 
-class SpatialTransformerNetworkCNN(FunctionSet):
+class SpatialTransformerNetworkCNN(Chain):
     def __init__(self, in_shape, out_shape, trans_type="translation"):
         assert trans_type in ["translation", "affine"]
         sqrt2 = np.sqrt(2)
@@ -114,8 +114,6 @@ if __name__ == '__main__':
     model = SpatialTransformerNetworkCNN(in_shape, out_shape, "affine")
     if args.gpu >= 0:
         model.to_gpu()
-        x_valid_data = cuda.to_gpu(x_valid_data)
-        t_valid_data = cuda.to_gpu(t_valid_data)
         x_test_data = cuda.to_gpu(x_test_data)
         t_test_data = cuda.to_gpu(t_test_data)
     initial_model = copy.deepcopy(model)
@@ -156,19 +154,26 @@ if __name__ == '__main__':
 
                 losses.append(cuda.to_cpu(loss.data))
                 accuracies.append(cuda.to_cpu(accuracy.data))
-                gWs += np.array([np.linalg.norm(cuda.to_cpu(w)) for w in
-                                 model.gradients[::2]])
-
+                gWs += xp.array([np.linalg.norm(cuda.to_cpu(p.data)) for p in
+                                 model.params()])
             train_loss = np.mean(losses)
             train_accuracy = np.mean(accuracies)
 
-            valid_loss, valid_accuracy, valid_variables = model.compute_loss(
-                x_valid_data, t_valid_data, train=False, return_variables=True)
-            y, x_st, theta, points = variables
-            y_valid, x_st_valid, theta_valid, points_valid = valid_variables
+            losses = []
+            accuracies = []
+            for indices in np.array_split(np.arange(num_valid), num_batches):
+                x_batch = xp.asarray(x_valid_data[indices])
+                t_batch = xp.asarray(t_valid_data[indices])
+                actual_size = len(indices)
+                loss, accuracy, variables = model.compute_loss(
+                    x_batch, t_batch, train=False, return_variables=True)
+                y, x_st, theta, points = variables
 
-            valid_loss = cuda.to_cpu(valid_loss.data)
-            valid_accuracy = cuda.to_cpu(valid_accuracy.data)
+                losses.append(cuda.to_cpu(loss.data) * actual_size)
+                accuracies.append(cuda.to_cpu(accuracy.data) * actual_size)
+            valid_loss = np.sum(losses) / num_valid
+            valid_accuracy = np.sum(accuracies) / num_valid
+
             if valid_loss < valid_loss_best:
                 model_best = copy.deepcopy(model)
                 valid_loss_best = valid_loss
@@ -178,8 +183,8 @@ if __name__ == '__main__':
             print "(time: %f)" % (time.time() - time_begin)
 
             # print norms of the weights
-            print "    |W|", [np.linalg.norm(cuda.to_cpu(w)) for w in
-                              model.parameters[::2]]
+            print "    |W|", [np.linalg.norm(cuda.to_cpu(p.data)) for p in
+                              model.params()]
             print "    |gW|", gWs.astype(np.float32).tolist()
 
             # pring scores
@@ -204,7 +209,7 @@ if __name__ == '__main__':
             plt.ylabel('loss')
             plt.ylim([0, 2])
             plt.legend(['tloss', 'vloss'],
-                       loc='best')
+                       loc='lower left')
             # plot accuracy histories
             plt.twinx()
             plt.plot(np.arange(epoch+1), np.array(train_accuracy_history))
@@ -215,7 +220,7 @@ if __name__ == '__main__':
             plt.ylim([0.6, 1])
 
             plt.legend(['tacc', 'vacc'],
-                       loc='best')
+                       loc='upper left')
             plt.plot([epoch_best]*2, [0, 1], '-k')
             plt.grid()
             plt.show()
@@ -223,7 +228,7 @@ if __name__ == '__main__':
 
             fig = plt.figure()
             ax = fig.add_subplot(1, 2, 1)
-            print "model.theta.bias:", model.st.parameters[-1]
+            print "model.theta.bias:", model.st.loc_net[-1].b.data
 
             print "theta:", theta.data[0]
             ax.matshow(cuda.to_cpu(x_batch[0]).reshape(in_shape),

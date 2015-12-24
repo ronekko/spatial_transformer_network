@@ -10,10 +10,9 @@ import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 import chainer.functions as F
-from chainer import Variable, FunctionSet, Function
+from chainer import Variable, Function, Chain, ChainList
 from chainer import cuda, gradient_check
 from chainer.utils import type_check
-
 
 # TODO: write test
 _place_kernel = cuda.cupy.ElementwiseKernel(
@@ -322,15 +321,6 @@ class GridGeneratorTranslation(Function):
         self.out_shape = out_shape
         out_height, out_width = out_shape
 
-        x = np.arange(out_width) - out_width / 2.0
-        y = np.arange(out_height) - out_height / 2.0
-        x, y = np.meshgrid(x, y, indexing='xy')
-        one = np.ones(out_shape)
-        # G in 3.2 "Parameterised Sampling Grid
-        self.points_t = np.vstack((x.ravel(),
-                                   y.ravel(),
-                                   one.ravel())).astype(np.float32)
-
     def check_type_forward(self, in_types):
         type_check.expect(in_types.size() == 1)
         theta_type, = in_types
@@ -346,6 +336,15 @@ class GridGeneratorTranslation(Function):
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
+        out_height, out_width = self.out_shape
+        # G in 3.2 "Parameterised Sampling Grid
+        x = np.arange(out_width) - (out_width - 1.0) / 2.0
+        y = np.arange(out_height) - (out_height - 1.0) / 2.0
+        x, y = np.meshgrid(x, y, indexing='xy')
+        one = xp.ones(self.out_shape)
+        self.points_t = xp.vstack((xp.asarray(x.ravel()),
+                                   xp.asarray(y.ravel()),
+                                   one.ravel())).astype(np.float32)
 
         # use np.tile() because cupy.tile() has not been implemented yet
         eyes_3d = xp.asarray(np.tile(np.eye(2), (batch_size, 1, 1)))
@@ -353,7 +352,8 @@ class GridGeneratorTranslation(Function):
         A = xp.dstack((eyes_3d, theta_3d))  # transformation matrix
         points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = xp.array([in_width / 2.0, in_height / 2.0], dtype=xp.float32)
+        offset = xp.array([(in_width - 1.0) / 2.0,
+                           (in_height - 1.0) / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
@@ -374,16 +374,8 @@ class GridGeneratorAffine(Function):
         """
         self.in_shape = in_shape
         self.out_shape = out_shape
+        in_height, in_width = in_shape
         out_height, out_width = out_shape
-
-        x = np.arange(out_width) - (out_width - 1.0) / 2.0
-        y = np.arange(out_height) - (out_height - 1.0) / 2.0
-        x, y = np.meshgrid(x, y, indexing='xy')
-        one = np.ones(out_shape) * (out_width - 1.0) / 2.0
-        # G in 3.2 "Parameterised Sampling Grid
-        self.points_t = np.vstack((x.ravel(),
-                                   y.ravel(),
-                                   one.ravel())).astype(np.float32)
 
     def check_type_forward(self, in_types):
         type_check.expect(in_types.size() == 1)
@@ -400,12 +392,21 @@ class GridGeneratorAffine(Function):
         theta, = inputs
         batch_size = len(theta)
         in_height, in_width = self.in_shape
+        out_height, out_width = self.out_shape
+        # G in 3.2 "Parameterised Sampling Grid
+        x = np.arange(out_width) - (out_width - 1.0) / 2.0
+        y = np.arange(out_height) - (out_height - 1.0) / 2.0
+        x, y = np.meshgrid(x, y, indexing='xy')
+        one = xp.ones(self.out_shape) * (in_width - 1.0) / 2.0
+        self.points_t = xp.vstack((xp.asarray(x.ravel()),
+                                   xp.asarray(y.ravel()),
+                                   one.ravel())).astype(np.float32)
 
         A = theta.reshape(batch_size, 2, 3)
         points_s = xp.dot(A, self.points_t).astype(xp.float32)
 
-        offset = xp.array([(in_height - 1.0) / 2.0,
-                           (in_width - 1.0) / 2.0], dtype=xp.float32)
+        offset = xp.array([(in_width - 1.0) / 2.0,
+                           (in_height - 1.0) / 2.0], dtype=xp.float32)
         offset = offset.reshape(1, -1, 1)
         points_s += offset
         return (points_s,)
@@ -418,26 +419,26 @@ class GridGeneratorAffine(Function):
         return (gtheta,)
 
 
-class FCLocalizationNetwork(FunctionSet):
+class FCLocalizationNetwork(ChainList):
     def __init__(self, in_size, theta_size):
         sqrt2 = np.sqrt(2)
         super(FCLocalizationNetwork, self).__init__(
-            fc1=F.Linear(in_size, 32, wscale=1),
-            fc2=F.Linear(32, 32, wscale=sqrt2),
-            fc3=F.Linear(32, 32, wscale=sqrt2),
-            fc4=F.Linear(32, theta_size,
-                         initialW=np.zeros((theta_size, 32), dtype=np.float32))
+            F.Linear(in_size, 32, wscale=1),
+            F.Linear(32, 32, wscale=sqrt2),
+            F.Linear(32, 32, wscale=sqrt2),
+            F.Linear(32, theta_size,
+                     initialW=np.zeros((theta_size, 32), dtype=np.float32))
         )
 
     def __call__(self, x, train=False):
-        h = F.relu(self.fc1(x))
-        h = F.relu(self.fc2(h))
-        h = F.relu(self.fc3(h))
-        theta = self.fc4(h)  # theta has the shape of (len(x), theta_size)
+        h = F.relu(self[0](x))
+        h = F.relu(self[1](h))
+        h = F.relu(self[2](h))
+        theta = self[3](h)  # theta has the shape of (len(x), theta_size)
         return theta
 
 
-class SpatialTransformer(Function):
+class SpatialTransformer(Chain):
     """See A.3 of "Spatial Transformer Networks"
        http://arxiv.org/abs/1506.02025v1
 
@@ -464,10 +465,13 @@ class SpatialTransformer(Function):
         in_size = np.prod(in_shape)
         if loc_net_class is None:
             loc_net_class = FCLocalizationNetwork
-        self.loc_net = loc_net_class(in_size, self.theta_size)
+        loc_net = loc_net_class(in_size, self.theta_size)
+        assert isinstance(loc_net, ChainList), """
+            'loc_net' must be ChainList"""
+        super(SpatialTransformer, self).__init__(loc_net=loc_net)
 
         # set initial bias of the last layer of localization network
-        theta_bias_init = self.loc_net.parameters[-1]
+        theta_bias_init = self.loc_net[-1].b.data
         translation_init = np.zeros(2, dtype=np.float32)
         if transformation == "translation":
             theta_bias_init[:] = translation_init
@@ -491,33 +495,6 @@ class SpatialTransformer(Function):
         else:
             return (y, theta)
 
-    def to_gpu(self, device=None):
-        self.loc_net.to_gpu(device)
-        self.grid_generator.to_gpu(device)
-        self.image_sampler.to_gpu(device)
-        return self
-
-    def to_cpu(self):
-        self.loc_net.to_cpu()
-        self.grid_generator.to_cpu()
-        self.image_sampler.to_cpu()
-        return self
-
-    @property
-    def parameters(self):
-        return self.loc_net.parameters
-
-    @parameters.setter
-    def parameters(self, params):
-        self.loc_net.parameters = params
-
-    @property
-    def gradients(self):
-        return self.loc_net.gradients
-
-    @gradients.setter
-    def gradients(self, grads):
-        self.loc_net.gradients = grads
 
 if __name__ == '__main__':
     try:

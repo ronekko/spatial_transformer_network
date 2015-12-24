@@ -122,7 +122,8 @@ class SpatialTransformerTest(unittest.TestCase):
         in_shape = (5, 5)
         out_shape = (2, 2)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
-        self.assertNotEqual(len(spatial_transformer.parameters), 0)
+        num_params = sum(1 for x in spatial_transformer.params())
+        self.assertNotEqual(num_params, 0)
 
     @attr.gpu
     def test_spatial_transformer_to_gpu(self):
@@ -130,10 +131,8 @@ class SpatialTransformerTest(unittest.TestCase):
         out_shape = (2, 2)
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         spatial_transformer.to_gpu()
-        self.assertIsInstance(spatial_transformer.grid_generator.points_t,
-                              cupy.ndarray)
-        self.assertTrue(all([isinstance(p, cupy.ndarray)
-            for p in spatial_transformer.loc_net.parameters]))
+        self.assertTrue(all([isinstance(param.data, cupy.ndarray)
+            for param in spatial_transformer.loc_net.params()]))
 
     @attr.gpu
     def test_spatial_transformer_to_cpu(self):
@@ -142,10 +141,8 @@ class SpatialTransformerTest(unittest.TestCase):
         spatial_transformer = SpatialTransformer(in_shape, out_shape)
         spatial_transformer.to_gpu()
         spatial_transformer.to_cpu()
-        self.assertIsInstance(spatial_transformer.grid_generator.points_t,
-                              np.ndarray)
-        self.assertTrue(all([isinstance(param, np.ndarray)
-            for param in spatial_transformer.loc_net.parameters]))
+        self.assertTrue(all([isinstance(param.data, np.ndarray)
+            for param in spatial_transformer.loc_net.params()]))
 
 
 class GridGeneratorTranslationTest(unittest.TestCase):
@@ -183,7 +180,6 @@ class GridGeneratorTranslationTest(unittest.TestCase):
 
         # value calculated by GridGenerator
         grid_generator = GridGeneratorTranslation(in_shape, out_shape)
-        grid_generator.to_gpu()
         points_s = grid_generator(Variable(theta)).data.get()
 
         # expected value
@@ -245,7 +241,7 @@ class ImageSamplerTest(unittest.TestCase):
                               [0.1, 1.3, 2.5, 3, 3.99]]], dtype=cupy.float32)
 
         # a
-        image_sampler = ImageSampler().to_gpu()
+        image_sampler = ImageSampler()
         y = image_sampler(Variable(x), Variable(points)).data.get()
         print y
 
@@ -338,8 +334,6 @@ class ImageSamplerTest(unittest.TestCase):
         x = Variable(x_data)
         points = Variable(points_data)
         y = image_sampler(x, points)
-        y.grad = np.ones_like(y.data)
-        y.backward()
 
         # y (data)
         expected_y = np.array([[3, 4.5, 6, 10.5, 12, 13.5, 18, 19.5, 21],
@@ -390,7 +384,6 @@ class ImageSamplerTest(unittest.TestCase):
         x = Variable(x_data)
         points = Variable(points_data)
         image_sampler = ImageSampler()
-        image_sampler.to_gpu()
         y = image_sampler(x, points)
 
         func = lambda: image_sampler.forward((x_data, points_data))
